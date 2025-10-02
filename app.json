@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "naraigoto2",
+    "slug": "naraigoto2",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "scheme": "kikkake",
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "router": {
+        "origin": "https://kikkake.local"
+      },
+      "testAccounts": {
+        "user": {
+          "email": "test-user@naraigoto.local",
+          "password": "TestUser123!"
+        },
+        "provider": {
+          "email": "test-provider@naraigoto.local",
+          "password": "TestProvider123!"
+        }
+      }
+    }
+  }
+}
