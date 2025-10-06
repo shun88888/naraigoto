@@ -37,7 +37,7 @@ export function CustomTabBar() {
         elevation: 20,
         zIndex: 9999
       }}
-      pointerEvents="box-none"
+      pointerEvents="auto"
     >
       {tabs.map((tab) => {
         const Icon = tab.icon;

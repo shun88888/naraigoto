@@ -8,7 +8,6 @@ import { SearchForm } from '../../../src/components/search/SearchForm';
 import { TipBanner } from '../../../src/components/search/TipBanner';
 import { SortBar } from '../../../src/components/search/SortBar';
 import { ResultCard } from '../../../src/components/search/ResultCard';
-import { CustomTabBar } from '../../../src/components/CustomTabBar';
 
 export default function SearchScreen() {
   const router = useRouter();
@@ -49,10 +48,9 @@ export default function SearchScreen() {
   }, [q, addHistory, fetchPage]);
 
   return (
-    <View style={{ flex: 1 }}>
-      <FlatList
-        style={{ flex: 1, backgroundColor: '#F8F8F8' }}
-        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: Platform.OS === 'ios' ? 106 : 86 }}
+    <FlatList
+      style={{ flex: 1, backgroundColor: '#F8F8F8' }}
+      contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 16 }}
       data={items}
       keyExtractor={(it) => String(it.id)}
       renderItem={({ item }) => (
@@ -90,8 +88,6 @@ export default function SearchScreen() {
       ListFooterComponent={() => (
         <View style={{ paddingVertical: 16 }}>{loading ? <Text style={{ textAlign: 'center' }}>読み込み中…</Text> : null}</View>
       )}
-      />
-      <CustomTabBar />
-    </View>
+    />
   );
 }

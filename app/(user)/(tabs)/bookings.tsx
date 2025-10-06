@@ -4,7 +4,6 @@ import { listBookings } from '../../../src/lib/api';
 import { dummyExperiences } from '../../../src/lib/dummyData';
 import { mockBookings } from '../../../src/lib/bookingMocks';
 import { useRouter } from 'expo-router';
-import { CustomTabBar } from '../../../src/components/CustomTabBar';
 
 export default function MyBookingsScreen() {
   const [items, setItems] = useState<any[]>([]);
@@ -198,7 +197,7 @@ export default function MyBookingsScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: '#F8F8F8' }}>
       <ScrollView
-        contentContainerStyle={{ padding: 20, paddingBottom: Platform.OS === 'ios' ? 106 : 86 }}
+        contentContainerStyle={{ padding: 20, paddingBottom: 20 }}
         showsVerticalScrollIndicator={false}
       >
 
@@ -284,7 +283,6 @@ export default function MyBookingsScreen() {
           </>
         )}
       </ScrollView>
-      <CustomTabBar />
     </View>
   );
 }

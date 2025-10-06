@@ -3,7 +3,6 @@ import { View, Text, ScrollView, TouchableOpacity, Platform } from 'react-native
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useAppStore } from '../../../src/state/store';
 import { RadarChart } from '../../../src/components/RadarChart';
-import { CustomTabBar } from '../../../src/components/CustomTabBar';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -47,7 +46,7 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: Platform.OS === 'ios' ? 106 : 86 }}>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 20 }}>
         {/* Profile Card */}
         <View style={{
           backgroundColor: '#FFFFFF',
@@ -129,7 +128,6 @@ export default function ProfileScreen() {
           </View>
         </View>
       </ScrollView>
-      <CustomTabBar />
     </View>
   );
 }
