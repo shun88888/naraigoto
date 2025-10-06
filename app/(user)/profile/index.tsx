@@ -1,5 +1,5 @@
 import React, { useCallback, useRef } from 'react';
-import { View, Text, SafeAreaView, ScrollView, Image, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, Image, TouchableOpacity, Platform, StatusBar } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useAppStore } from '../../../src/state/store';
 import { RadarChart } from '../../../src/components/RadarChart';
@@ -25,115 +25,114 @@ export default function ProfileScreen() {
     router.push('/(user)/settings');
   }, [router]);
 
+  const statusBarHeight = Platform.OS === 'ios' ? 44 : StatusBar.currentHeight || 0;
+
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F8F8' }}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-        {/* Hero */}
-        <View style={{ height: 220, backgroundColor: '#1F2937', position: 'relative' }}>
-          {/* Settings gear icon */}
-          <TouchableOpacity
-            onPress={openSettings}
-            style={{
-              position: 'absolute',
-              top: 16,
-              right: 16,
-              width: 40,
-              height: 40,
-              borderRadius: 20,
-              backgroundColor: 'rgba(255, 255, 255, 0.2)',
-              justifyContent: 'center',
-              alignItems: 'center',
-              zIndex: 10
-            }}
-            activeOpacity={0.8}
-          >
-            <View style={{
-              width: 20,
-              height: 20,
-              borderRadius: 10,
-              borderWidth: 2,
-              borderColor: '#fff',
-              position: 'relative'
-            }}>
-              {/* Gear teeth */}
-              <View style={{ position: 'absolute', top: -2, left: 7, width: 2, height: 4, backgroundColor: '#fff' }} />
-              <View style={{ position: 'absolute', bottom: -2, left: 7, width: 2, height: 4, backgroundColor: '#fff' }} />
-              <View style={{ position: 'absolute', left: -2, top: 7, width: 4, height: 2, backgroundColor: '#fff' }} />
-              <View style={{ position: 'absolute', right: -2, top: 7, width: 4, height: 2, backgroundColor: '#fff' }} />
-              {/* Center circle */}
-              <View style={{
-                position: 'absolute',
-                top: 6,
-                left: 6,
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                borderWidth: 1,
-                borderColor: '#fff',
-                backgroundColor: 'transparent'
-              }} />
-            </View>
-          </TouchableOpacity>
-        </View>
-        <View style={{ alignItems: 'center', marginTop: -48 }}>
+    <View style={{ flex: 1, backgroundColor: '#F8F8F8' }}>
+      <View style={{ paddingTop: statusBarHeight + 8, paddingHorizontal: 20, paddingBottom: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#F8F8F8' }}>
+        <Text style={{ fontSize: 28, fontWeight: '800', color: '#111827' }}>
+          プロフィール
+        </Text>
+        <TouchableOpacity
+          onPress={openSettings}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 12,
+            backgroundColor: '#FFFFFF',
+            borderWidth: 1,
+            borderColor: '#E5E7EB',
+            justifyContent: 'center',
+            alignItems: 'center'
+          }}
+          activeOpacity={0.8}
+        >
+          <Text style={{ fontSize: 18 }}>⚙️</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 24 }}>
+        {/* Profile Card */}
+        <View style={{
+          backgroundColor: '#FFFFFF',
+          borderRadius: 18,
+          padding: 20,
+          marginBottom: 16,
+          borderWidth: 1,
+          borderColor: '#E5E7EB',
+          alignItems: 'center'
+        }}>
           <View
             style={{
-              width: 96,
-              height: 96,
-              borderRadius: 48,
-              backgroundColor: '#D4D4D4',
-              borderWidth: 4,
-              borderColor: '#fff'
+              width: 80,
+              height: 80,
+              borderRadius: 40,
+              backgroundColor: '#E5E7EB',
+              marginBottom: 16
             }}
           />
-        </View>
+          <Text style={{ fontWeight: '800', fontSize: 20, marginBottom: 4 }}>みさね</Text>
+          <Text style={{ color: '#6B7280', fontSize: 14, marginBottom: 12 }}>@user</Text>
 
-        <View style={{ padding: 16, alignItems: 'center', gap: 8 }}>
-          <Text style={{ fontWeight: '800', fontSize: 22 }}>みさね（仮）</Text>
-          <Text style={{ color: '#6B7280' }}>@user / WOMEN / 10歳</Text>
-          <Text style={{ color: '#10B981', fontWeight: '700' }}>ブランド公認（仮）</Text>
-          <View style={{ flexDirection: 'row', gap: 16, marginTop: 6 }}>
-            <Text><Text style={{ fontWeight: '800' }}>{likes.length}</Text> いいね</Text>
-            <Text><Text style={{ fontWeight: '800' }}>3,912</Text> フォロワー</Text>
-            <Text><Text style={{ fontWeight: '800' }}>42</Text> フォロー</Text>
+          <View style={{ flexDirection: 'row', gap: 20, marginTop: 8 }}>
+            <View style={{ alignItems: 'center' }}>
+              <Text style={{ fontWeight: '800', fontSize: 18 }}>{likes.length}</Text>
+              <Text style={{ color: '#6B7280', fontSize: 12 }}>いいね</Text>
+            </View>
+            <View style={{ width: 1, backgroundColor: '#E5E7EB' }} />
+            <View style={{ alignItems: 'center' }}>
+              <Text style={{ fontWeight: '800', fontSize: 18 }}>12</Text>
+              <Text style={{ color: '#6B7280', fontSize: 12 }}>体験済み</Text>
+            </View>
           </View>
-          <TouchableOpacity
-            style={{
-              marginTop: 8,
-              backgroundColor: '#111827',
-              paddingHorizontal: 24,
-              paddingVertical: 12,
-              borderRadius: 28
-            }}
-            activeOpacity={0.8}
-          >
-            <Text style={{ color: '#FFD400', fontWeight: '800' }}>フォローする</Text>
-          </TouchableOpacity>
         </View>
 
-        {/* Content */}
-        <View style={{ paddingHorizontal: 16, gap: 12 }}>
-        <Text style={{ fontWeight: '800', fontSize: 18 }}>プロフィール</Text>
-        <View style={{ padding: 16, borderRadius: 16, backgroundColor: '#fff' }}>
-          <Text style={{ fontWeight: '700' }}>いいね数: {likes.length}</Text>
+        {/* Ability Card */}
+        <View style={{
+          backgroundColor: '#FFFFFF',
+          borderRadius: 18,
+          padding: 20,
+          marginBottom: 16,
+          borderWidth: 1,
+          borderColor: '#E5E7EB'
+        }}>
+          <Text style={{ fontWeight: '700', fontSize: 18, marginBottom: 16 }}>能力指数</Text>
+          <View style={{ alignItems: 'center' }}>
+            <RadarChart
+              labels={["創造性", "問題解決", "協働", "コミュ", "やり抜く"]}
+              values={[
+                ability.creativity * 20,
+                ability.problemSolving * 20,
+                ability.collaboration * 20,
+                ability.communication * 20,
+                ability.persistence * 20
+              ]}
+              compareValues={[60, 60, 60, 60, 60]}
+            />
+          </View>
         </View>
 
-        <View style={{ padding: 16, borderRadius: 16, backgroundColor: '#fff', gap: 8, alignItems: 'center' }}>
-          <Text style={{ fontWeight: '700', marginBottom: 8 }}>能力指数</Text>
-          <RadarChart
-            labels={["創造性", "問題解決", "協働", "コミュ", "やり抜く"]}
-            values={[
-              ability.creativity * 20,
-              ability.problemSolving * 20,
-              ability.collaboration * 20,
-              ability.communication * 20,
-              ability.persistence * 20
-            ]}
-            compareValues={[60, 60, 60, 60, 60]}
-          />
-        </View>
+        {/* Info Card */}
+        <View style={{
+          backgroundColor: '#FFFFFF',
+          borderRadius: 18,
+          padding: 20,
+          borderWidth: 1,
+          borderColor: '#E5E7EB'
+        }}>
+          <Text style={{ fontWeight: '700', fontSize: 18, marginBottom: 12 }}>基本情報</Text>
+          <View style={{ gap: 10 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Text style={{ color: '#6B7280', fontSize: 14 }}>年齢</Text>
+              <Text style={{ fontWeight: '600', fontSize: 14 }}>10歳</Text>
+            </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Text style={{ color: '#6B7280', fontSize: 14 }}>性別</Text>
+              <Text style={{ fontWeight: '600', fontSize: 14 }}>女性</Text>
+            </View>
+          </View>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, SafeAreaView, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Alert, Platform, StatusBar } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../../src/state/auth-context';
 import { useAppStore } from '../../../src/state/store';
@@ -77,9 +77,11 @@ export default function SettingsScreen() {
     );
   };
 
+  const statusBarHeight = Platform.OS === 'ios' ? 44 : StatusBar.currentHeight || 0;
+
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F8F8' }}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
+    <View style={{ flex: 1, backgroundColor: '#F8F8F8' }}>
+      <ScrollView contentContainerStyle={{ paddingTop: statusBarHeight + 16, padding: 16, paddingBottom: 32 }}>
         <View style={{ marginBottom: 24 }}>
           <Text style={{ fontSize: 24, fontWeight: '800', marginBottom: 8 }}>設定</Text>
           <Text style={{ color: '#6B7280', fontSize: 16 }}>アカウントや通知の設定を管理できます</Text>
@@ -144,6 +146,6 @@ export default function SettingsScreen() {
           <Text style={{ color: '#9CA3AF', fontSize: 14 }}>naraigoto v1.0.0</Text>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }

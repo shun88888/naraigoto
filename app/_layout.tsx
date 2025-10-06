@@ -7,6 +7,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GluestackUIProvider } from '@gluestack-ui/themed';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Linking from 'expo-linking';
 import { config } from '@gluestack-ui/config';
 import { AuthProvider, useAuth } from '../src/state/auth-context';
@@ -14,11 +15,13 @@ import { useAppStore } from '../src/state/store';
 
 export default function RootLayout() {
   return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <RootNavigator />
-      </AuthProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <AuthProvider>
+          <RootNavigator />
+        </AuthProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -108,10 +111,8 @@ function RootNavigator() {
         <Stack.Screen name="(auth)/sign-in" options={{ headerShown: false }} />
         <Stack.Screen name="(user)/(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="(provider)/provider/(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="(user)/home" options={{ title: 'ホーム' }} />
         <Stack.Screen name="(user)/onboarding/distance" options={{ title: '距離設定' }} />
         <Stack.Screen name="(user)/onboarding/interests" options={{ title: '興味・関心' }} />
-        <Stack.Screen name="(user)/bookings/index" options={{ title: 'マイ予約' }} />
         <Stack.Screen name="(user)/bookings/[id]" options={{ title: '予約詳細' }} />
         <Stack.Screen name="(user)/experience/[id]" options={{ title: '体験詳細' }} />
         <Stack.Screen name="(user)/booking/calendar" options={{ title: '日付選択' }} />
@@ -120,8 +121,7 @@ function RootNavigator() {
         <Stack.Screen name="(user)/booking/confirm" options={{ title: '確認' }} />
         <Stack.Screen name="(user)/booking/done" options={{ title: '予約完了' }} />
         <Stack.Screen name="(user)/ticket/[id]" options={{ title: 'チケット' }} />
-        <Stack.Screen name="(user)/profile/index" options={{ title: 'プロフィール' }} />
-        <Stack.Screen name="(user)/search/index" options={{ title: '検索' }} />
+        <Stack.Screen name="(user)/profile/children" options={{ title: '子どもプロフィール' }} />
         <Stack.Screen name="(user)/help/index" options={{ title: 'ヘルプ' }} />
         <Stack.Screen name="(user)/settings/index" options={{ title: '設定' }} />
         <Stack.Screen name="(user)/settings/account" options={{ title: 'アカウント' }} />

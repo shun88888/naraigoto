@@ -1,67 +1,97 @@
 import { supabase } from '../lib/supabase';
-import type { Slot, Reservation, ReservationFeedback } from '../state/provider-store';
+
+// Updated types for new schema
+export type ProviderSlot = {
+  id: string;
+  experience_id: string;
+  experience_title?: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  remaining: number;
+  capacity: number;
+  status: 'open' | 'closed' | 'canceled';
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type ProviderBooking = {
+  id: string;
+  user_id: string;
+  slot_id: string;
+  experience_id: string;
+  status: 'confirmed' | 'cancelled' | 'completed';
+  participants: number;
+  user_name?: string;
+  user_email?: string;
+  slot_date?: string;
+  slot_start_time?: string;
+  slot_end_time?: string;
+  experience_title?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type ProviderFeedback = {
+  id: string;
+  booking_id: string;
+  provider_id: string;
+  child_id?: string;
+  experience_id: string;
+  scores: {
+    creativity?: number;
+    problemSolving?: number;
+    collaboration?: number;
+    communication?: number;
+    persistence?: number;
+  };
+  comment?: string;
+  strengths?: string[];
+  tips?: string[];
+  created_at?: string;
+};
 
 export const providerService = {
-  // Slots
-  async fetchSlots(): Promise<Slot[]> {
+  // Slots Management
+  async fetchSlots(providerId: string): Promise<ProviderSlot[]> {
     const { data, error } = await supabase
-      .from('provider_slots')
-      .select('*')
+      .from('slots')
+      .select(`
+        *,
+        experiences!inner(id, title, provider_id)
+      `)
+      .eq('experiences.provider_id', providerId)
       .order('date', { ascending: true });
 
     if (error) throw error;
 
-    return (data || []).map((row) => ({
+    return (data || []).map((row: any) => ({
       id: row.id,
-      experience: row.experience,
+      experience_id: row.experience_id,
+      experience_title: row.experiences?.title,
       date: row.date,
-      start: row.start_time,
-      end: row.end_time,
-      venue: row.venue,
-      capacity: row.capacity,
+      start_time: row.start_time,
+      end_time: row.end_time,
       remaining: row.remaining,
-      ageRange: row.age_range,
-      mentor: row.mentor,
-      state: row.state,
-      price: row.price,
-      category: row.category,
-      tags: row.tags,
-      note: row.note,
-      deadlineHours: row.deadline_hours,
-      repeat: {
-        type: row.repeat_type,
-        until: row.repeat_until,
-        count: row.repeat_count
-      },
-      createdBy: row.created_by,
-      updatedAt: row.updated_at
+      capacity: row.capacity,
+      status: row.status,
+      created_at: row.created_at,
+      updated_at: row.updated_at
     }));
   },
 
-  async upsertSlot(slot: Slot): Promise<void> {
+  async upsertSlot(slot: Partial<ProviderSlot> & { id: string; experience_id: string }): Promise<void> {
     const { error } = await supabase
-      .from('provider_slots')
+      .from('slots')
       .upsert({
         id: slot.id,
-        experience: slot.experience,
+        experience_id: slot.experience_id,
         date: slot.date,
-        start_time: slot.start,
-        end_time: slot.end,
-        venue: slot.venue,
-        capacity: slot.capacity,
-        remaining: slot.remaining,
-        age_range: slot.ageRange,
-        mentor: slot.mentor,
-        state: slot.state,
-        price: slot.price,
-        category: slot.category,
-        tags: slot.tags,
-        note: slot.note,
-        deadline_hours: slot.deadlineHours,
-        repeat_type: slot.repeat?.type || 'none',
-        repeat_until: slot.repeat?.until,
-        repeat_count: slot.repeat?.count,
-        created_by: slot.createdBy,
+        start_time: slot.start_time,
+        end_time: slot.end_time,
+        remaining: slot.remaining ?? 0,
+        capacity: slot.capacity ?? 0,
+        status: slot.status ?? 'open',
         updated_at: new Date().toISOString()
       });
 
@@ -69,156 +99,85 @@ export const providerService = {
   },
 
   async deleteSlot(id: string): Promise<void> {
-    const { error } = await supabase
-      .from('provider_slots')
-      .delete()
-      .eq('id', id);
+    // Use RPC function to ensure no active bookings
+    const { data, error } = await supabase.rpc('delete_slot', { p_slot: id });
 
     if (error) throw error;
+    if (!data) throw new Error('Cannot delete slot with active bookings');
   },
 
-  // Reservations
-  async fetchReservations(): Promise<Reservation[]> {
-    const { data, error } = await supabase
-      .from('provider_reservations')
-      .select('*')
-      .order('date', { ascending: true });
+  // Bookings/Reservations Management
+  async fetchBookings(providerId: string, fromDate?: string): Promise<ProviderBooking[]> {
+    const { data, error } = await supabase.rpc('provider_bookings', {
+      p_provider: providerId,
+      p_from: fromDate || null
+    });
 
     if (error) throw error;
 
-    const reservations = await Promise.all(
-      (data || []).map(async (row) => {
-        // Fetch history
-        const { data: historyData } = await supabase
-          .from('reservation_history')
-          .select('*')
-          .eq('reservation_id', row.id)
-          .order('created_at', { ascending: false });
-
-        return {
-          id: row.id,
-          date: row.date,
-          start: row.start_time,
-          end: row.end_time,
-          experience: row.experience,
-          venue: row.venue,
-          mentor: row.mentor,
-          child: {
-            name: row.child_name,
-            kana: row.child_kana,
-            age: row.child_age
-          },
-          guardian: {
-            name: row.guardian_name,
-            phone: row.guardian_phone,
-            email: row.guardian_email
-          },
-          profile: {
-            strengths: row.strengths || [],
-            weakPoints: row.weak_points || [],
-            recent: row.recent_activity || ''
-          },
-          history: (historyData || []).map((h) => ({
-            date: h.date,
-            experience: h.experience,
-            memo: h.memo
-          })),
-          status: row.status,
-          memo: row.memo,
-          feedback: row.feedback_focus
-            ? {
-                focus: row.feedback_focus,
-                collaboration: row.feedback_collaboration,
-                challenge: row.feedback_challenge,
-                creativity: row.feedback_creativity,
-                stamina: row.feedback_stamina,
-                note: row.feedback_note,
-                childSummary: row.feedback_child_summary,
-                shareWithGuardian: row.feedback_share_with_guardian,
-                updatedAt: row.feedback_updated_at
-              }
-            : undefined,
-          pendingSync: row.pending_sync
-        };
-      })
-    );
-
-    return reservations;
+    return (data || []).map((row: any) => ({
+      id: row.booking_id,
+      user_id: row.user_id,
+      slot_id: row.slot_id,
+      experience_id: row.experience_id,
+      status: row.booking_status,
+      participants: row.participants,
+      user_name: row.user_name,
+      user_email: row.user_email,
+      slot_date: row.slot_date,
+      slot_start_time: row.slot_start_time,
+      slot_end_time: row.slot_end_time,
+      experience_title: row.experience_title,
+      created_at: row.booking_created_at
+    }));
   },
 
-  async updateReservationStatus(id: string, status: string): Promise<void> {
+  async updateBookingStatus(bookingId: string, status: 'confirmed' | 'cancelled' | 'completed'): Promise<void> {
     const { error } = await supabase
-      .from('provider_reservations')
+      .from('bookings')
       .update({
         status,
         updated_at: new Date().toISOString()
       })
-      .eq('id', id);
+      .eq('id', bookingId);
 
     if (error) throw error;
   },
 
-  async saveReservationMemo(id: string, memo?: string): Promise<void> {
-    const { error } = await supabase
-      .from('provider_reservations')
-      .update({
-        memo,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', id);
+  // Feedback Management
+  async createFeedback(feedback: {
+    booking_id: string;
+    provider_id: string;
+    child_id?: string;
+    experience_id: string;
+    scores: Record<string, number>;
+    comment?: string;
+    strengths?: string[];
+    tips?: string[];
+  }): Promise<string> {
+    const { data, error } = await supabase.rpc('create_feedback', {
+      p_booking: feedback.booking_id,
+      p_provider: feedback.provider_id,
+      p_child: feedback.child_id || null,
+      p_experience: feedback.experience_id,
+      p_scores: feedback.scores,
+      p_comment: feedback.comment || null,
+      p_strengths: feedback.strengths || [],
+      p_tips: feedback.tips || []
+    });
 
     if (error) throw error;
+    return data;
   },
 
-  async saveReservationContact(
-    id: string,
-    contact: { phone?: string; email?: string }
-  ): Promise<void> {
-    const { error } = await supabase
-      .from('provider_reservations')
-      .update({
-        guardian_phone: contact.phone,
-        guardian_email: contact.email,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', id);
+  async fetchFeedbacksByBooking(bookingId: string): Promise<ProviderFeedback[]> {
+    const { data, error } = await supabase
+      .from('feedbacks')
+      .select('*')
+      .eq('booking_id', bookingId)
+      .order('created_at', { ascending: false });
 
     if (error) throw error;
-  },
-
-  async saveFeedback(id: string, feedback: ReservationFeedback): Promise<void> {
-    const { error } = await supabase
-      .from('provider_reservations')
-      .update({
-        feedback_focus: feedback.focus,
-        feedback_collaboration: feedback.collaboration,
-        feedback_challenge: feedback.challenge,
-        feedback_creativity: feedback.creativity,
-        feedback_stamina: feedback.stamina,
-        feedback_note: feedback.note,
-        feedback_child_summary: feedback.childSummary,
-        feedback_share_with_guardian: feedback.shareWithGuardian,
-        feedback_updated_at: feedback.updatedAt,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', id);
-
-    if (error) throw error;
-
-    // Add to history
-    const { data: reservation } = await supabase
-      .from('provider_reservations')
-      .select('experience')
-      .eq('id', id)
-      .single();
-
-    if (reservation) {
-      await supabase.from('reservation_history').insert({
-        reservation_id: id,
-        date: new Date().toISOString().slice(0, 10),
-        experience: reservation.experience,
-        memo: feedback.note || ''
-      });
-    }
+    return data || [];
   }
 };

@@ -1,24 +1,41 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
+  Animated,
+  Dimensions,
+  Easing,
+  GestureResponderEvent,
+  LayoutAnimation,
   Modal,
+  PanResponder,
   Platform,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
-import { UICard } from '../../../../src/components/ui/Card';
-import { colors } from '../../../../src/lib/colors';
+import { useIsFocused } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  Calendar as CalendarIcon,
+  Clock,
+  MapPin,
+  Plus,
+  RefreshCw,
+  User,
+  X,
+  ChevronLeft,
+  ChevronRight
+} from 'lucide-react-native';
+
 import { UIButton } from '../../../../src/components/ui/Button';
 import { SegmentedControl } from '../../../../src/components/provider/SegmentedControl';
-import { Tag } from '../../../../src/components/provider/Tag';
+import { colors } from '../../../../src/lib/colors';
 import {
   useProviderStore,
   type Slot as StoreSlot,
-  type SlotState,
-  type RepeatType
+  type SlotState
 } from '../../../../src/state/provider-store';
 
 const VIEW_MODES = [
@@ -31,34 +48,102 @@ type ViewMode = (typeof VIEW_MODES)[number]['value'];
 
 type Slot = StoreSlot;
 
-const cloneSlot = (slot: Slot): Slot => ({
-  ...slot,
-  tags: slot.tags ? [...slot.tags] : [],
-  repeat: slot.repeat ? { ...slot.repeat } : undefined
-});
+type SlotDraft = Pick<
+  Slot,
+  | 'id'
+  | 'experience'
+  | 'date'
+  | 'start'
+  | 'end'
+  | 'venue'
+  | 'capacity'
+  | 'remaining'
+  | 'mentor'
+  | 'ageRange'
+  | 'state'
+  | 'price'
+  | 'category'
+  | 'tags'
+  | 'note'
+  | 'deadlineHours'
+  | 'repeat'
+>;
 
-const generateId = () => `SLOT-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+const stateColors: Record<SlotState, string> = {
+  公開中: '#22C55E',
+  下書き: '#9CA3AF',
+  満席: '#F97316',
+  クローズ: '#EF4444'
+};
 
-const addDays = (iso: string, delta: number) => {
-  const date = new Date(`${iso}T00:00:00`);
-  date.setDate(date.getDate() + delta);
-  return date.toISOString().slice(0, 10);
+const stateLabels: Record<SlotState, string> = {
+  公開中: '公開中',
+  下書き: '下書き',
+  満席: '満席',
+  クローズ: 'クローズ'
+};
+
+type EventLayout = {
+  slot: Slot;
+  top: number;
+  height: number;
+  column: number;
+  columns: number;
+};
+
+const HOUR_HEIGHT = 64;
+const START_HOUR = 6;
+const END_HOUR = 22;
+
+const HOURS = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, idx) => START_HOUR + idx);
+const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
+
+const windowWidth = Dimensions.get('window').width;
+const SWIPE_THRESHOLD = 50;
+
+if (Platform.OS === 'android' && LayoutAnimation?.configureNext) {
+  const UIManager = require('react-native').UIManager;
+  if (UIManager?.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+  }
+}
+
+const formatDate = (date: Date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const parseISODate = (iso: string) => {
+  const [year, month, day] = iso.split('-').map(Number);
+  return new Date(year, month - 1, day);
 };
 
 const todayISO = () => {
-  const date = new Date();
-  const formatter = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' });
-  return formatter.format(date);
+  const formatter = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  return formatter.format(new Date());
 };
 
-const formatDay = (iso: string) => {
-  const [y, m, d] = iso.split('-');
-  const week = ['日', '月', '火', '水', '木', '金', '土'];
-  const day = new Date(`${iso}T00:00:00`).getDay();
-  return `${Number(m)}月${Number(d)}日（${week[day]}）`;
+const addDays = (iso: string, delta: number) => {
+  const date = parseISODate(iso);
+  date.setDate(date.getDate() + delta);
+  return formatDate(date);
 };
 
-const formatMonthLabel = (iso: string) => {
+const startOfWeek = (iso: string) => {
+  const date = parseISODate(iso);
+  const day = date.getDay();
+  date.setDate(date.getDate() - day);
+  return formatDate(date);
+};
+
+const formatMonthTitle = (iso: string) => {
   const formatter = new Intl.DateTimeFormat('ja-JP', {
     timeZone: 'Asia/Tokyo',
     year: 'numeric',
@@ -67,71 +152,64 @@ const formatMonthLabel = (iso: string) => {
   return formatter.format(new Date(`${iso}T00:00:00`));
 };
 
-const WEEKDAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
+const toMinutes = (time: string) => {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+};
 
 const buildMonthMatrix = (iso: string) => {
-  const reference = new Date(`${iso}T00:00:00`);
+  const reference = parseISODate(iso);
   const year = reference.getFullYear();
   const month = reference.getMonth();
-
-  const firstOfMonth = new Date(reference);
-  firstOfMonth.setDate(1);
-  const startOffset = firstOfMonth.getDay();
-
-  const startDate = new Date(firstOfMonth);
-  startDate.setDate(firstOfMonth.getDate() - startOffset);
+  const firstDay = new Date(year, month, 1);
+  const offset = firstDay.getDay();
+  const start = new Date(firstDay);
+  start.setDate(firstDay.getDate() - offset);
 
   const matrix: string[][] = [];
   for (let week = 0; week < 6; week += 1) {
     const row: string[] = [];
     for (let day = 0; day < 7; day += 1) {
-      const current = new Date(startDate);
-      current.setDate(startDate.getDate() + week * 7 + day);
-      row.push(current.toISOString().slice(0, 10));
+      const current = new Date(start);
+      current.setDate(start.getDate() + week * 7 + day);
+      row.push(formatDate(current));
     }
     matrix.push(row);
   }
-
-  return { matrix, year, month };
+  return matrix;
 };
 
-const stateColor: Record<SlotState, string> = {
-  公開中: '#16A34A',
-  下書き: '#9CA3AF',
-  満席: '#DB2777',
-  クローズ: '#B45309'
-};
-
-const stateLabel: Record<SlotState, string> = {
-  公開中: '公開中',
-  下書き: '下書き',
-  満席: '満席',
-  クローズ: 'クローズ'
-};
-
-const deadlineOptions = [1, 3, 6, 12, 24];
-
-const normalizeSlotState = (slot: Slot): Slot => {
-  if (slot.remaining <= 0 && slot.state === '公開中') {
-    return { ...slot, state: '満席' };
-  }
-  if (slot.remaining > 0 && slot.state === '満席') {
-    return { ...slot, state: '公開中' };
-  }
-  return slot;
-};
+const defaultDraft = (date: string): SlotDraft => ({
+  id: `SLOT-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
+  experience: '',
+  date,
+  start: '10:00',
+  end: '11:00',
+  venue: '',
+  capacity: 8,
+  remaining: 8,
+  mentor: '',
+  ageRange: '8-12歳',
+  state: '下書き',
+  price: '',
+  category: '',
+  tags: [],
+  note: '',
+  deadlineHours: 6,
+  repeat: { type: 'none' }
+});
 
 export default function ProviderSlots() {
+  const insets = useSafeAreaInsets();
+  const safeBottom = Math.max(insets.bottom, 12);
   const slots = useProviderStore((state) => state.slots);
-  const isOnline = useProviderStore((state) => state.isOnline);
   const offlineQueue = useProviderStore((state) => state.offlineQueue);
-  const setOnline = useProviderStore((state) => state.setOnline);
   const processQueue = useProviderStore((state) => state.processQueue);
   const fetchData = useProviderStore((state) => state.fetchData);
   const addSlot = useProviderStore((state) => state.addSlot);
   const updateSlot = useProviderStore((state) => state.updateSlot);
   const toggleSlotPublish = useProviderStore((state) => state.toggleSlotPublish);
-  const closeSlotAction = useProviderStore((state) => state.closeSlot);
+  const closeSlot = useProviderStore((state) => state.closeSlot);
 
   useEffect(() => {
     fetchData();
@@ -139,32 +217,93 @@ export default function ProviderSlots() {
 
   const [viewMode, setViewMode] = useState<ViewMode>('month');
   const [focusDate, setFocusDate] = useState(todayISO());
-  const [detailSlotId, setDetailSlotId] = useState<string | null>(null);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
-  const [slotDraft, setSlotDraft] = useState<Slot>({
-    id: generateId(),
-    experience: '',
-    date: focusDate,
-    start: '10:00',
-    end: '11:00',
-    venue: '',
-    capacity: 8,
-    remaining: 8,
-    ageRange: '',
-    mentor: '',
-    state: '下書き',
-    price: undefined,
-    category: undefined,
-    tags: [],
-    note: undefined,
-    deadlineHours: 6,
-    repeat: { type: 'none' },
-    createdBy: 'demo-user',
-    updatedAt: new Date().toISOString()
-  });
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
+  const [editorVisible, setEditorVisible] = useState(false);
+  const [draft, setDraft] = useState<SlotDraft>(defaultDraft(todayISO()));
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const isFocused = useIsFocused();
+  const translateX = useRef(new Animated.Value(0)).current;
+  const isAnimatingRef = useRef(false);
+  const calendarRef = useRef<View | null>(null);
+  const [calendarBounds, setCalendarBounds] = useState<{ top: number; bottom: number }>({ top: 0, bottom: Number.MAX_SAFE_INTEGER });
+
+  const updateCalendarBounds = useCallback(() => {
+    calendarRef.current?.measureInWindow?.((_, y, __, height) => {
+      setCalendarBounds({ top: y, bottom: y + height });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isFocused) return;
+    const timer = setTimeout(updateCalendarBounds, 0);
+    return () => clearTimeout(timer);
+  }, [updateCalendarBounds, viewMode, focusDate, slots.length, isFocused]);
+
+  const animateSwipe = (direction: -1 | 1) => {
+    if (isAnimatingRef.current) return;
+    isAnimatingRef.current = true;
+    Animated.timing(translateX, {
+      toValue: direction * -windowWidth,
+      duration: 160,
+      easing: Easing.inOut(Easing.ease),
+      useNativeDriver: true
+    }).start(() => {
+      handleShiftFocus(direction);
+      translateX.setValue(direction * windowWidth);
+      Animated.timing(translateX, {
+        toValue: 0,
+        duration: 160,
+        easing: Easing.inOut(Easing.ease),
+        useNativeDriver: true
+      }).start(() => {
+        isAnimatingRef.current = false;
+      });
+    });
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        const y0 = gestureState.y0 ?? evt.nativeEvent.pageY;
+        const withinCalendar = y0 >= calendarBounds.top && y0 <= calendarBounds.bottom;
+        if (!withinCalendar) return false;
+        return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && Math.abs(gestureState.dx) > SWIPE_THRESHOLD;
+      },
+      onMoveShouldSetPanResponderCapture: () => false,
+      onPanResponderMove: (_evt, gestureState) => {
+        if (isAnimatingRef.current) return;
+        translateX.setValue(gestureState.dx);
+      },
+      onPanResponderRelease: (_evt, gestureState) => {
+        if (isAnimatingRef.current) return;
+        if (gestureState.dx > SWIPE_THRESHOLD) {
+          animateSwipe(-1);
+        } else if (gestureState.dx < -SWIPE_THRESHOLD) {
+          animateSwipe(1);
+        } else {
+          Animated.spring(translateX, {
+            toValue: 0,
+            stiffness: 200,
+            damping: 20,
+            mass: 0.6,
+            useNativeDriver: true
+          }).start();
+        }
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(translateX, {
+          toValue: 0,
+          stiffness: 200,
+          damping: 20,
+          mass: 0.6,
+          useNativeDriver: true
+        }).start();
+      }
+    })
+  ).current;
 
   const slotsByDate = useMemo(() => {
     const map = new Map<string, Slot[]>();
@@ -177,791 +316,1245 @@ export default function ProviderSlots() {
     return map;
   }, [slots]);
 
-  const daysToRender = useMemo(() => {
-    if (viewMode === 'day') return [focusDate];
-    if (viewMode === 'week') {
-      // 前後8週間を含めて合計17週間（119日）表示 - 無限スクロール風
-      const startDate = addDays(focusDate, -56);
-      return Array.from({ length: 119 }, (_, idx) => addDays(startDate, idx));
+  const selectedSlot = useMemo(() => slots.find((slot) => slot.id === selectedSlotId) ?? null, [slots, selectedSlotId]);
+
+  const weekDates = useMemo(() => {
+    if (viewMode !== 'week') return [];
+    const start = startOfWeek(focusDate);
+    return Array.from({ length: 7 }, (_, idx) => addDays(start, idx));
+  }, [viewMode, focusDate]);
+
+  const dayDates = viewMode === 'day' ? [focusDate] : [];
+
+  const handleShiftFocus = (direction: -1 | 1) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    if (viewMode === 'month') {
+      const date = new Date(`${focusDate}T00:00:00`);
+      date.setDate(1);
+      date.setMonth(date.getMonth() + direction);
+      setFocusDate(formatDate(date));
+    } else if (viewMode === 'week') {
+      setFocusDate(addDays(focusDate, direction * 7));
+    } else {
+      setFocusDate(addDays(focusDate, direction));
     }
-    return [];
-  }, [viewMode, focusDate]);
-
-  const monthView = useMemo(() => {
-    if (viewMode !== 'month') return null;
-    return buildMonthMatrix(focusDate);
-  }, [viewMode, focusDate]);
-
-  const activeSlots = useMemo(() => slotsByDate.get(focusDate) ?? [], [slotsByDate, focusDate]);
-  const detailSlot = useMemo(() => slots.find((slot) => slot.id === detailSlotId) ?? null, [slots, detailSlotId]);
-
-  const resetDraft = (base?: Slot) => {
-    const source: Slot = base
-      ? cloneSlot(base)
-      : {
-          id: generateId(),
-          experience: '',
-          date: focusDate,
-          start: '10:00',
-          end: '11:00',
-          venue: '',
-          capacity: 8,
-          remaining: 8,
-          ageRange: '',
-          mentor: '',
-          state: '下書き',
-          price: undefined,
-          category: undefined,
-          tags: [],
-          note: undefined,
-          deadlineHours: 6,
-          repeat: { type: 'none' },
-          createdBy: 'demo-user',
-          updatedAt: new Date().toISOString()
-        };
-    setSlotDraft(source);
-    setFormErrors({});
   };
 
-  const openCreateModal = (base?: Slot) => {
-    setEditingSlotId(null);
-    resetDraft(base);
-    setShowAdvanced(false);
-    setModalVisible(true);
-  };
-
-  const openEditModal = (slot: Slot) => {
-    setEditingSlotId(slot.id);
-    resetDraft(slot);
-    setShowAdvanced(false);
-    setModalVisible(true);
+  const openEditor = (slot?: Slot, suggestedDate?: string, suggestedStart?: string) => {
+    if (slot) {
+      setDraft({
+        id: slot.id,
+        experience: slot.experience,
+        date: slot.date,
+        start: slot.start,
+        end: slot.end,
+        venue: slot.venue,
+        capacity: slot.capacity,
+        remaining: slot.remaining,
+        mentor: slot.mentor,
+        ageRange: slot.ageRange,
+        state: slot.state,
+        price: slot.price ?? '',
+        category: slot.category ?? '',
+        tags: slot.tags ?? [],
+        note: slot.note ?? '',
+        deadlineHours: slot.deadlineHours,
+        repeat: slot.repeat ?? { type: 'none' }
+      });
+    } else {
+      setDraft({
+        ...defaultDraft(suggestedDate ?? focusDate),
+        start: suggestedStart ?? '10:00'
+      });
+    }
+    setErrors({});
+    setEditorVisible(true);
   };
 
   const validateDraft = () => {
-    const errors: Record<string, string> = {};
-    if (!slotDraft.experience.trim()) errors.experience = '体験名を入力してください';
-    if (!slotDraft.date) errors.date = '日付を入力してください';
-    if (!slotDraft.start || !slotDraft.end) errors.time = '開始・終了時刻を入力してください';
-    if (!slotDraft.venue.trim()) errors.venue = '会場を入力してください';
-    if (!slotDraft.ageRange.trim()) errors.ageRange = '対象年齢を入力してください';
-    if (!slotDraft.capacity || slotDraft.capacity < 1) errors.capacity = '定員は1以上を入力してください';
-    if (!slotDraft.state) errors.state = '公開状態を選択してください';
-    if (slotDraft.start && slotDraft.end && slotDraft.start >= slotDraft.end) errors.time = '終了時刻は開始より後にしてください';
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
+    const next: Record<string, string> = {};
+    if (!draft.experience.trim()) next.experience = '体験名を入力してください';
+    if (!draft.date) next.date = '日付を入力してください';
+    if (!draft.start || !draft.end) next.time = '時刻を入力してください';
+    if (draft.start >= draft.end) next.time = '終了時刻は開始より後にしてください';
+    if (!draft.venue.trim()) next.venue = '会場を入力してください';
+    if (!draft.mentor.trim()) next.mentor = '担当を入力してください';
+    if (!draft.capacity || draft.capacity < 1) next.capacity = '定員は1以上で入力してください';
+    setErrors(next);
+    return Object.keys(next).length === 0;
   };
 
-  const hasConflict = (candidate: Slot, ignoreId?: string) => {
-    return slots.some((slot) => {
-      if (ignoreId && slot.id === ignoreId) return false;
-      if (slot.date !== candidate.date) return false;
-      const overlap = !(candidate.end <= slot.start || candidate.start >= slot.end);
-      const sameMentor = slot.mentor === candidate.mentor;
-      const sameVenue = slot.venue === candidate.venue;
-      return overlap && (sameMentor || sameVenue);
-    });
-  };
-
-  const saveSlot = () => {
+  const handleSaveDraft = () => {
     if (!validateDraft()) return;
-    if (hasConflict(slotDraft, editingSlotId ?? undefined)) {
-      Alert.alert('競合を解消してください', '同じ時間帯に担当者または会場が重複しています。');
-      return;
-    }
-    const normalized = normalizeSlotState(slotDraft);
-    const updated = { ...normalized, updatedAt: new Date().toISOString() };
-    if (editingSlotId) {
-      updateSlot(updated);
-      Alert.alert('保存しました', '体験枠を更新しました。');
+    const payload: Slot = {
+      id: draft.id,
+      experience: draft.experience,
+      date: draft.date,
+      start: draft.start,
+      end: draft.end,
+      venue: draft.venue,
+      capacity: draft.capacity,
+      remaining: Math.min(draft.remaining, draft.capacity),
+      mentor: draft.mentor,
+      ageRange: draft.ageRange,
+      state: draft.state,
+      price: draft.price || undefined,
+      category: draft.category || undefined,
+      tags: draft.tags,
+      note: draft.note || undefined,
+      deadlineHours: draft.deadlineHours,
+      repeat: draft.repeat,
+      createdBy: 'provider-demo',
+      updatedAt: new Date().toISOString()
+    };
+
+    const exists = slots.some((slot) => slot.id === draft.id);
+    if (exists) {
+      updateSlot(payload);
     } else {
-      addSlot(updated);
-      Alert.alert('保存しました', '体験枠を追加しました。');
+      addSlot(payload);
     }
-    setModalVisible(false);
-    setDetailSlotId(updated.id);
+    setEditorVisible(false);
   };
 
-  const togglePublish = (slot: Slot) => {
+  const handleDuplicate = (slot: Slot) => {
+    setDraft({
+      ...defaultDraft(slot.date),
+      experience: slot.experience,
+      start: slot.start,
+      end: slot.end,
+      venue: slot.venue,
+      capacity: slot.capacity,
+      remaining: slot.capacity,
+      mentor: slot.mentor,
+      ageRange: slot.ageRange,
+      price: slot.price ?? '',
+      category: slot.category ?? '',
+      tags: slot.tags ?? [],
+      note: slot.note ?? '',
+      deadlineHours: slot.deadlineHours,
+      repeat: slot.repeat ?? { type: 'none' }
+    });
+    setErrors({});
+    setEditorVisible(true);
+  };
+
+  const handleTogglePublish = (slot: Slot) => {
     toggleSlotPublish(slot.id);
   };
 
   const handleCloseSlot = (slot: Slot) => {
-    closeSlotAction(slot.id);
-  };
-
-  const duplicateSlot = (slot: Slot) => {
-    const base = cloneSlot(slot);
-    const duplicate: Slot = {
-      ...base,
-      id: generateId(),
-      remaining: base.capacity,
-      state: '下書き',
-      updatedAt: new Date().toISOString(),
-      createdBy: 'demo-user'
-    };
-    openCreateModal(duplicate);
-  };
-
-  const shiftFocus = (direction: number) => {
-    setFocusDate((prev) => {
-      if (viewMode === 'month') {
-        const current = new Date(`${prev}T00:00:00`);
-        const currentDay = current.getDate();
-        current.setDate(1);
-        current.setMonth(current.getMonth() + direction);
-        const lastDay = new Date(current.getFullYear(), current.getMonth() + 1, 0).getDate();
-        current.setDate(Math.min(currentDay, lastDay));
-        return current.toISOString().slice(0, 10);
-      }
-      const delta = viewMode === 'week' ? direction * 7 : direction;
-      return addDays(prev, delta);
-    });
-  };
-
-  const renderSlotBadge = (slot: Slot) => (
-    <TouchableOpacity
-      key={slot.id}
-      onPress={() => setDetailSlotId(slot.id)}
-      style={{
-        borderWidth: 1,
-        borderColor: colors.border,
-        borderRadius: 12,
-        padding: 8,
-        backgroundColor: '#FFFFFF',
-        marginTop: 8
-      }}
-    >
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Text style={{ fontSize: 14, fontWeight: '700' }}>{slot.start} - {slot.end}</Text>
-        <Text style={{ fontSize: 12, color: stateColor[slot.state] }}>{slot.state}</Text>
-      </View>
-      <Text style={{ fontSize: 14 }}>{slot.experience}</Text>
-      <Text style={{ fontSize: 12, color: colors.muted }}>残席 {slot.remaining} / {slot.capacity}</Text>
-    </TouchableOpacity>
-  );
-
-  const lastMinuteFlag = (slot: Slot) => {
-    const now = new Date();
-    const slotDate = new Date(`${slot.date}T${slot.start}:00`);
-    const diff = slotDate.getTime() - now.getTime();
-    return diff <= 24 * 60 * 60 * 1000;
+    closeSlot(slot.id);
   };
 
   const renderCalendar = () => {
-    if (viewMode === 'day') {
-      const timeSlots = Array.from({ length: 16 }, (_, i) => i + 8); // 8:00 - 23:00
-
+    if (viewMode === 'month') {
       return (
-        <View style={{ backgroundColor: '#FFFFFF', borderRadius: 8, overflow: 'hidden' }}>
-          <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: '#E5E7EB', backgroundColor: '#F8F9FA' }}>
-            <Text style={{ fontSize: 18, fontWeight: '700' }}>{formatDay(focusDate)}</Text>
+        <MonthCalendar
+          matrix={buildMonthMatrix(focusDate)}
+          focusDate={focusDate}
+          today={todayISO()}
+          eventsByDate={slotsByDate}
+          onSelectDate={(date) => setFocusDate(date)}
+          onSelectSlot={(slot) => setSelectedSlotId(slot.id)}
+          onLongPressDate={(date) => openEditor(undefined, date)}
+        />
+      );
+    }
+
+    const dates = viewMode === 'week' ? weekDates : dayDates;
+    return (
+      <TimelineCalendar
+        dates={dates}
+        eventsByDate={slotsByDate}
+        focusDate={focusDate}
+        onSelectSlot={(slot) => setSelectedSlotId(slot.id)}
+        onCreateSlot={(date, start) => openEditor(undefined, date, start)}
+      />
+    );
+  };
+
+  return (
+    <>
+      <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+        <ScrollView
+          contentContainerStyle={[
+            styles.contentContainer,
+            { paddingBottom: insets.bottom + (Platform.OS === 'ios' ? 120 : 100) }
+          ]}
+          bounces={false}
+          scrollEnabled={viewMode !== 'month'}
+        >
+          <View style={styles.headerRow}>
+            <TouchableOpacity style={styles.monthButton} onPress={() => setViewMode('month')}>
+              <CalendarIcon size={18} color={colors.fg} />
+              <Text style={styles.monthTitle}>{formatMonthTitle(focusDate)}</Text>
+            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              <TouchableOpacity style={styles.headerIcon} onPress={() => animateSwipe(-1)}>
+                <ChevronLeft size={20} color={colors.fg} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.headerIcon}
+                onPress={() => {
+                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                  setFocusDate(todayISO());
+                }}
+              >
+                <Text style={styles.headerIconText}>今日</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.headerIcon} onPress={() => animateSwipe(1)}>
+                <ChevronRight size={20} color={colors.fg} />
+              </TouchableOpacity>
+            </View>
           </View>
 
-          <ScrollView style={{ maxHeight: 700 }}>
-            {timeSlots.map((hour) => {
-              const slotsInHour = activeSlots.filter((slot) => {
-                const startHour = parseInt(slot.start.split(':')[0]);
-                return startHour === hour;
-              });
+          <View style={styles.segmentContainer}>
+            <SegmentedControl
+              segments={VIEW_MODES.map((mode) => ({ label: mode.label, value: mode.value }))}
+              value={viewMode}
+              onChange={(value) => setViewMode(value as ViewMode)}
+            />
+          </View>
 
-              return (
-                <View key={hour} style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#F3F4F6', minHeight: 60 }}>
-                  <View style={{ width: 80, paddingVertical: 12, paddingHorizontal: 12, backgroundColor: '#F8F9FA', borderRightWidth: 1, borderRightColor: '#E5E7EB' }}>
-                    <Text style={{ fontSize: 13, color: colors.muted }}>{`${hour}:00`}</Text>
+          {offlineQueue.length > 0 ? (
+            <View style={styles.syncBanner}>
+              <RefreshCw size={16} color={colors.fg} />
+              <Text style={styles.syncBannerText}>オフラインで保存された更新があります</Text>
+              <TouchableOpacity onPress={processQueue}>
+                <Text style={styles.syncBannerAction}>再試行</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
+          <Animated.View
+            pointerEvents='box-none'
+            style={[styles.swipeContainer, { transform: [{ translateX }] }]}
+            {...(isFocused ? panResponder.panHandlers : {})}
+          >
+            <View
+              style={styles.calendarWrapper}
+              ref={(node) => {
+                calendarRef.current = node;
+              }}
+              onLayout={updateCalendarBounds}
+            >
+              {renderCalendar()}
+            </View>
+          </Animated.View>
+        </ScrollView>
+
+        <View
+          pointerEvents='box-none'
+          style={[
+            styles.fabContainer,
+            { bottom: safeBottom + (Platform.OS === 'ios' ? 48 : 56) }
+          ]}
+        >
+          <TouchableOpacity style={styles.fab} onPress={() => openEditor()} activeOpacity={0.85}>
+            <Plus size={28} color='#FFFFFF' />
+          </TouchableOpacity>
+        </View>
+
+        {offlineQueue.length > 0 ? (
+          <View
+            pointerEvents='box-none'
+            style={[
+              styles.syncContainer,
+              { bottom: safeBottom + (Platform.OS === 'ios' ? 104 : 96) }
+            ]}
+          >
+            <TouchableOpacity style={styles.syncButton} onPress={processQueue} activeOpacity={0.85}>
+              <RefreshCw size={18} color='#FFFFFF' style={{ marginRight: 6 }} />
+              <Text style={styles.syncButtonText}>同期</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </View>
+
+      <SlotDetailSheet
+        slot={selectedSlot}
+        visible={Boolean(selectedSlot)}
+        onClose={() => setSelectedSlotId(null)}
+        onEdit={(slot) => openEditor(slot)}
+        onDuplicate={handleDuplicate}
+        onTogglePublish={handleTogglePublish}
+        onCloseSlot={handleCloseSlot}
+      />
+
+      <SlotEditorModal
+        visible={editorVisible}
+        draft={draft}
+        errors={errors}
+        onChange={setDraft}
+        onClose={() => setEditorVisible(false)}
+        onSave={handleSaveDraft}
+      />
+    </>
+  );
+}
+
+type MonthCalendarProps = {
+  matrix: string[][];
+  focusDate: string;
+  today: string;
+  eventsByDate: Map<string, Slot[]>;
+  onSelectDate: (date: string) => void;
+  onSelectSlot: (slot: Slot) => void;
+  onLongPressDate: (date: string) => void;
+};
+
+function MonthCalendar({ matrix, focusDate, today, eventsByDate, onSelectDate, onSelectSlot, onLongPressDate }: MonthCalendarProps) {
+  const selectedMonth = new Date(`${focusDate}T00:00:00`).getMonth();
+
+  return (
+    <View style={styles.monthContainer}>
+      <View style={styles.monthWeekRow}>
+        {WEEKDAY_LABELS.map((label) => (
+          <Text key={label} style={styles.monthWeekText}>{label}</Text>
+        ))}
+      </View>
+      {matrix.map((week, index) => (
+        <View key={`week-${index}`} style={styles.monthRow}>
+          {week.map((date) => {
+            const dayDate = new Date(`${date}T00:00:00`);
+            const isCurrentMonth = dayDate.getMonth() === selectedMonth;
+            const isToday = date === today;
+            const isSelected = date === focusDate;
+            const dayEvents = eventsByDate.get(date) ?? [];
+            const visibleEvents = isCurrentMonth ? dayEvents : [];
+            const totalCapacity = visibleEvents.reduce((acc, slot) => acc + slot.capacity, 0);
+            const reservedCount = visibleEvents.reduce(
+              (acc, slot) => acc + Math.max(0, slot.capacity - slot.remaining),
+              0
+            );
+
+            return (
+              <TouchableOpacity
+                key={date}
+                style={[styles.monthCell, !isCurrentMonth && { opacity: 0.35 }]}
+                onPress={() => onSelectDate(date)}
+                onLongPress={() => onLongPressDate(date)}
+                activeOpacity={0.85}
+              >
+                <View style={styles.monthCellHeader}>
+                  <View
+                    style={[
+                      styles.monthDateBadge,
+                      isSelected && styles.monthDateBadgeSelected,
+                      isToday && !isSelected && styles.monthDateBadgeToday
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.monthDateText,
+                        isSelected && { color: colors.accent },
+                        !isSelected && isToday && { color: colors.fg }
+                      ]}
+                    >
+                      {dayDate.getDate()}
+                    </Text>
                   </View>
-                  <View style={{ flex: 1, padding: 8 }}>
-                    {slotsInHour.map((slot) => {
-                      const booked = Math.max(0, slot.capacity - slot.remaining);
-                      return (
-                        <TouchableOpacity
-                          key={slot.id}
-                          onPress={() => setDetailSlotId(slot.id)}
-                          activeOpacity={0.8}
-                          style={{
-                            backgroundColor: stateColor[slot.state],
-                            padding: 12,
-                            borderRadius: 8,
-                            marginBottom: 8
-                          }}
-                        >
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#FFFFFF' }}>{slot.experience}</Text>
-                            <Text style={{ fontSize: 12, color: '#FFFFFF', opacity: 0.9 }}>{stateLabel[slot.state]}</Text>
-                          </View>
-                          <Text style={{ fontSize: 14, color: '#FFFFFF', opacity: 0.9, marginTop: 4 }}>
-                            {slot.start} - {slot.end}
-                          </Text>
-                          <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
-                            <Text style={{ fontSize: 12, color: '#FFFFFF', opacity: 0.9 }}>会場: {slot.venue}</Text>
-                            <Text style={{ fontSize: 12, color: '#FFFFFF', opacity: 0.9 }}>予約{booked}/枠{slot.capacity}</Text>
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
+                </View>
+
+                <View style={styles.monthEventList}>
+                  {isCurrentMonth ? (
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      style={styles.monthEventSummary}
+                      onPress={() => {
+                        if (visibleEvents.length === 1) {
+                          onSelectSlot(visibleEvents[0]);
+                        }
+                      }}
+                    >
+                      <Text style={styles.monthEventSummaryText}>{reservedCount}/{totalCapacity || visibleEvents.length}</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={[styles.monthEventSummary, { opacity: 0.4 }]}> 
+                      <Text style={styles.monthEventSummaryText}>0/0</Text>
+                    </View>
+                  )}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+
+type TimelineCalendarProps = {
+  dates: string[];
+  eventsByDate: Map<string, Slot[]>;
+  focusDate: string;
+  onSelectSlot: (slot: Slot) => void;
+  onCreateSlot: (date: string, start?: string) => void;
+};
+
+function TimelineCalendar({ dates, eventsByDate, focusDate, onSelectSlot, onCreateSlot }: TimelineCalendarProps) {
+  const contentHeight = (END_HOUR - START_HOUR + 1) * HOUR_HEIGHT;
+  const timeColumnWidth = 60;
+  const horizontalPadding = 16;
+  const availableWidth = windowWidth - horizontalPadding * 2 - timeColumnWidth;
+  const dayColumnWidth = availableWidth / Math.max(1, dates.length);
+  const gridWidth = dayColumnWidth * dates.length;
+  const horizontalScrollable = gridWidth > availableWidth + 1;
+
+  const headerScrollRef = useRef<ScrollView | null>(null);
+  const bodyScrollRef = useRef<ScrollView | null>(null);
+  const syncingRef = useRef(false);
+
+  const handleHorizontalScroll = (x: number, source: 'header' | 'body') => {
+    if (syncingRef.current) return;
+    syncingRef.current = true;
+    if (source === 'header') {
+      bodyScrollRef.current?.scrollTo({ x, animated: false });
+    } else {
+      headerScrollRef.current?.scrollTo({ x, animated: false });
+    }
+    requestAnimationFrame(() => {
+      syncingRef.current = false;
+    });
+  };
+
+  return (
+    <View style={[styles.timelineContainer, { paddingHorizontal: horizontalPadding }]}>
+      <View style={styles.timelineHeaderRow}>
+        <View style={[styles.timeColumn, styles.timelineHeaderLabel]}>
+          <Text style={styles.timelineHeaderText}>時間</Text>
+        </View>
+        <ScrollView
+          horizontal={horizontalScrollable}
+          ref={headerScrollRef}
+          showsHorizontalScrollIndicator={false}
+          bounces={false}
+          scrollEventThrottle={16}
+          onScroll={(e) => handleHorizontalScroll(e.nativeEvent.contentOffset.x, 'header')}
+        >
+          <View style={{ flexDirection: 'row', width: horizontalScrollable ? gridWidth : availableWidth }}>
+            {dates.map((date) => {
+              const dateObj = new Date(`${date}T00:00:00`);
+              const weekday = WEEKDAY_LABELS[dateObj.getDay()];
+              const isSelected = date === focusDate;
+              const isToday = date === todayISO();
+              return (
+                <View key={date} style={[styles.timelineDayHeader, { width: dayColumnWidth }]}> 
+                  <Text
+                    style={[
+                      styles.timelineDayWeek,
+                      (isToday || isSelected) && styles.timelineDayWeekToday
+                    ]}
+                  >
+                    {weekday}
+                  </Text>
+                  <View
+                    style={[
+                      styles.timelineDayBadge,
+                      isSelected && styles.timelineDayBadgeSelected,
+                      isToday && styles.timelineDayBadgeToday
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.timelineDayDate,
+                        isToday && styles.timelineDayDateToday,
+                        !isToday && isSelected && styles.timelineDayDateSelected
+                      ]}
+                    >
+                      {dateObj.getDate()}
+                    </Text>
                   </View>
                 </View>
               );
             })}
-          </ScrollView>
-        </View>
-      );
-    }
+          </View>
+        </ScrollView>
+      </View>
 
-    if (viewMode === 'month' && monthView) {
-      const { matrix, month } = monthView;
-      const selectedMonth = month;
-      const today = todayISO();
-
-      return (
-        <View style={{ gap: 0, backgroundColor: '#FFFFFF', borderRadius: 8, overflow: 'hidden' }}>
-          {/* 曜日ヘッダー */}
-          <View style={{ flexDirection: 'row', backgroundColor: '#F8F9FA', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' }}>
-            {WEEKDAY_LABELS.map((label, idx) => (
-              <View key={label} style={{ flex: 1, paddingVertical: 8, borderRightWidth: idx < 6 ? 1 : 0, borderRightColor: '#E5E7EB' }}>
-                <Text style={{ textAlign: 'center', fontSize: 12, fontWeight: '600', color: idx === 0 ? '#EF4444' : idx === 6 ? '#3B82F6' : colors.muted }}>
-                  {label}
-                </Text>
+      <ScrollView
+        style={{ maxHeight: 520 }}
+        contentContainerStyle={{ height: contentHeight }}
+        nestedScrollEnabled
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={{ flexDirection: 'row' }}>
+          <View style={[styles.timeColumn, { height: contentHeight }]}> 
+            {HOURS.map((hour) => (
+              <View key={hour} style={styles.timeLabelRow}>
+                <Text style={styles.timeLabelText}>{`${hour}:00`}</Text>
               </View>
             ))}
           </View>
-
-          {/* カレンダーグリッド */}
-          {matrix.map((week, rowIndex) => (
-            <View key={`week-${rowIndex}`} style={{ flexDirection: 'row', borderBottomWidth: rowIndex < matrix.length - 1 ? 1 : 0, borderBottomColor: '#E5E7EB' }}>
-              {week.map((day, colIndex) => {
-                const date = new Date(`${day}T00:00:00`);
-                const isCurrentMonth = date.getMonth() === selectedMonth;
-                const isSelected = day === focusDate;
-                const isToday = day === today;
-                const daySlots = slotsByDate.get(day) ?? [];
-
-                return (
-                  <TouchableOpacity
-                    key={day}
-                    style={{ flex: 1, borderRightWidth: colIndex < 6 ? 1 : 0, borderRightColor: '#E5E7EB' }}
-                    onPress={() => setFocusDate(day)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={{ minHeight: 100, padding: 4 }}>
-                      {/* 日付 */}
-                      <View style={{ alignItems: 'center', marginBottom: 4 }}>
-                        <View
-                          style={{
-                            width: 28,
-                            height: 28,
-                            borderRadius: 14,
-                            backgroundColor: isToday ? '#1A73E8' : isSelected ? '#E8F0FE' : 'transparent',
-                            justifyContent: 'center',
-                            alignItems: 'center'
-                          }}
-                        >
-                          <Text
-                            style={{
-                              fontSize: 13,
-                              fontWeight: isToday || isSelected ? '700' : '400',
-                              color: isToday ? '#FFFFFF' : !isCurrentMonth ? '#D1D5DB' : colIndex === 0 ? '#EF4444' : colIndex === 6 ? '#3B82F6' : colors.fg
-                            }}
-                          >
-                            {date.getDate()}
-                          </Text>
-                        </View>
-                      </View>
-
-                      {/* イベント */}
-                      <View style={{ gap: 2 }}>
-                        {daySlots.slice(0, 3).map((slot) => {
-                          const booked = Math.max(0, slot.capacity - slot.remaining);
-                          return (
-                            <TouchableOpacity
-                              key={slot.id}
-                              onPress={() => setDetailSlotId(slot.id)}
-                              activeOpacity={0.8}
-                              style={{
-                                backgroundColor: stateColor[slot.state],
-                                paddingHorizontal: 4,
-                                paddingVertical: 2,
-                                borderRadius: 4
-                              }}
-                            >
-                              <Text style={{ fontSize: 10, fontWeight: '600', color: '#FFFFFF' }} numberOfLines={1}>
-                                {slot.start} {slot.experience}
-                              </Text>
-                              <Text style={{ fontSize: 9, color: '#FFFFFF', opacity: 0.9 }}>
-                                予{booked}/枠{slot.capacity}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                        {daySlots.length > 3 && (
-                          <Text style={{ fontSize: 9, color: colors.muted, paddingLeft: 4 }}>+{daySlots.length - 3}件</Text>
-                        )}
-                      </View>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          ))}
-        </View>
-      );
-    }
-
-    // 週表示
-    if (viewMode === 'week') {
-      const today = todayISO();
-      const timeSlots = Array.from({ length: 16 }, (_, i) => i + 8); // 8:00 - 23:00
-
-      // 119日を7日ごとに17週に分割
-      const totalWeeks = Math.ceil(daysToRender.length / 7);
-      const weeks: string[][] = [];
-      for (let i = 0; i < totalWeeks; i++) {
-        weeks.push(daysToRender.slice(i * 7, (i + 1) * 7));
-      }
-
-      // 各日の固定幅（画面幅の1/7を想定、最小50px）
-      const dayWidth = 50;
-
-      return (
-        <View style={{ backgroundColor: '#FFFFFF', borderRadius: 8, overflow: 'hidden' }}>
-          <View style={{ flexDirection: 'row' }}>
-            {/* 固定の時間軸 */}
-            <View>
-              {/* ヘッダー部分（空白） */}
-              <View style={{ width: 50, height: 60, backgroundColor: '#F8F9FA', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' }} />
-
-              {/* タイムグリッド */}
-              <ScrollView style={{ maxHeight: 600 }} scrollEnabled={false}>
-                {timeSlots.map((hour) => (
-                  <View key={hour} style={{ width: 50, paddingVertical: 8, backgroundColor: '#F8F9FA', borderBottomWidth: 1, borderBottomColor: '#F3F4F6', minHeight: 60 }}>
-                    <Text style={{ textAlign: 'center', fontSize: 10, color: colors.muted }}>{`${hour}:00`}</Text>
-                  </View>
-                ))}
-              </ScrollView>
-            </View>
-
-            {/* 横スクロール可能な週表示 */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-              {weeks.map((weekDays, weekIndex) => (
-                <View key={`week-${weekIndex}`} style={{ flexDirection: 'column', width: dayWidth * 7 }}>
-                  {/* ヘッダー */}
-                  <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#E5E7EB', height: 60 }}>
-                    {weekDays.map((day) => {
-                      const date = new Date(`${day}T00:00:00`);
-                      const dayOfWeek = date.getDay();
-                      const isToday = day === today;
-                      const isSelected = day === focusDate;
-                      return (
-                        <TouchableOpacity
-                          key={day}
-                          style={{ width: dayWidth, paddingVertical: 8, backgroundColor: '#F8F9FA', borderLeftWidth: 1, borderLeftColor: '#E5E7EB' }}
-                          onPress={() => setFocusDate(day)}
-                        >
-                          <Text style={{ textAlign: 'center', fontSize: 9, color: dayOfWeek === 0 ? '#EF4444' : dayOfWeek === 6 ? '#3B82F6' : colors.muted }}>
-                            {WEEKDAY_LABELS[dayOfWeek]}
-                          </Text>
-                          <View style={{ alignItems: 'center', marginTop: 2 }}>
-                            <View
-                              style={{
-                                width: 24,
-                                height: 24,
-                                borderRadius: 12,
-                                backgroundColor: isToday ? '#1A73E8' : isSelected ? '#E8F0FE' : 'transparent',
-                                justifyContent: 'center',
-                                alignItems: 'center'
-                              }}
-                            >
-                              <Text style={{ fontSize: 12, fontWeight: isToday || isSelected ? '700' : '400', color: isToday ? '#FFFFFF' : colors.fg }}>
-                                {date.getDate()}
-                              </Text>
-                            </View>
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-
-                  {/* タイムグリッド */}
-                  <ScrollView style={{ maxHeight: 600 }} scrollEnabled={false}>
-                    {timeSlots.map((hour) => (
-                      <View key={hour} style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' }}>
-                        {weekDays.map((day) => {
-                          const daySlots = slotsByDate.get(day) ?? [];
-                          const slotsInHour = daySlots.filter((slot) => {
-                            const startHour = parseInt(slot.start.split(':')[0]);
-                            return startHour === hour;
-                          });
-
-                          return (
-                            <View key={day} style={{ width: dayWidth, minHeight: 60, padding: 2, borderLeftWidth: 1, borderLeftColor: '#E5E7EB' }}>
-                              {slotsInHour.map((slot) => {
-                                const booked = Math.max(0, slot.capacity - slot.remaining);
-                                return (
-                                  <TouchableOpacity
-                                    key={slot.id}
-                                    onPress={() => setDetailSlotId(slot.id)}
-                                    activeOpacity={0.8}
-                                    style={{
-                                      backgroundColor: stateColor[slot.state],
-                                      paddingHorizontal: 3,
-                                      paddingVertical: 3,
-                                      borderRadius: 4,
-                                      marginBottom: 2
-                                    }}
-                                  >
-                                    <Text style={{ fontSize: 9, fontWeight: '600', color: '#FFFFFF' }} numberOfLines={1}>
-                                      {slot.experience}
-                                    </Text>
-                                    <Text style={{ fontSize: 8, color: '#FFFFFF', opacity: 0.9 }} numberOfLines={1}>
-                                      {slot.start}-{slot.end}
-                                    </Text>
-                                    <Text style={{ fontSize: 8, color: '#FFFFFF', opacity: 0.9 }}>
-                                      予{booked}/枠{slot.capacity}
-                                    </Text>
-                                  </TouchableOpacity>
-                                );
-                              })}
-                            </View>
-                          );
-                        })}
-                      </View>
-                    ))}
-                  </ScrollView>
-                </View>
+          <ScrollView
+            horizontal={horizontalScrollable}
+            ref={bodyScrollRef}
+            showsHorizontalScrollIndicator={false}
+            bounces={false}
+            scrollEventThrottle={16}
+            onScroll={(e) => handleHorizontalScroll(e.nativeEvent.contentOffset.x, 'body')}
+          >
+            <View style={{ flexDirection: 'row', width: horizontalScrollable ? gridWidth : availableWidth }}>
+              {dates.map((date) => (
+                <TimelineDayColumn
+                  key={date}
+                  date={date}
+                  width={dayColumnWidth}
+                  events={eventsByDate.get(date) ?? []}
+                  onSelectSlot={onSelectSlot}
+                  onCreateSlot={onCreateSlot}
+                />
               ))}
-            </ScrollView>
-          </View>
+            </View>
+          </ScrollView>
         </View>
-      );
-    }
+      </ScrollView>
+    </View>
+  );
+}
 
-    // 日表示（デフォルト）
-    return null;
+type TimelineDayColumnProps = {
+  date: string;
+  width: number;
+  events: Slot[];
+  onSelectSlot: (slot: Slot) => void;
+  onCreateSlot: (date: string, start?: string) => void;
+};
+
+function TimelineDayColumn({ date, width, events, onSelectSlot, onCreateSlot }: TimelineDayColumnProps) {
+  const layouts = useMemo<EventLayout[]>(() => computeEventLayouts(events), [events]);
+
+  const handlePressBackground = (event: GestureResponderEvent) => {
+    const y = event.nativeEvent.locationY;
+    const minutesFromStart = Math.max(0, y / HOUR_HEIGHT * 60);
+    const hour = Math.floor(minutesFromStart / 60) + START_HOUR;
+    const minute = Math.round((minutesFromStart % 60) / 15) * 15;
+    const time = `${String(Math.min(23, hour)).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    onCreateSlot(date, time);
   };
 
-  const conflictPreview = editingSlotId ? hasConflict(slotDraft, editingSlotId) : hasConflict(slotDraft);
+  return (
+    <TouchableOpacity
+      activeOpacity={1}
+      onPress={handlePressBackground}
+      style={[styles.timelineDayColumn, { width }]}
+    >
+      {HOURS.map((hour) => (
+        <View key={hour} style={styles.timelineHourRow} />
+      ))}
+
+      {layouts.map(({ slot, top, height, column, columns }) => {
+        const margin = 4;
+        const availableWidth = width - margin * 2;
+        const colWidth = availableWidth / columns;
+        return (
+          <TouchableOpacity
+            key={slot.id}
+            activeOpacity={0.9}
+            onPress={() => onSelectSlot(slot)}
+            style={[
+              styles.timelineEvent,
+              {
+                top,
+                height,
+                left: margin + column * colWidth,
+                width: colWidth - 4,
+                borderColor: `${stateColors[slot.state]}66`
+              }
+            ]}
+          >
+            <Text style={styles.timelineEventTime}>{slot.start} - {slot.end}</Text>
+            <Text style={styles.timelineEventTitle} numberOfLines={2}>{slot.experience}</Text>
+            <Text style={styles.timelineEventMeta}>{slot.venue}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </TouchableOpacity>
+  );
+}
+
+function computeEventLayouts(events: Slot[]): EventLayout[] {
+  if (events.length === 0) return [];
+  const prepared = events.map((event) => ({
+    slot: event,
+    start: toMinutes(event.start),
+    end: toMinutes(event.end),
+    column: 0,
+    columns: 1
+  }));
+
+  const adjacency: number[][] = prepared.map(() => []);
+  for (let i = 0; i < prepared.length; i += 1) {
+    for (let j = i + 1; j < prepared.length; j += 1) {
+      if (isOverlap(prepared[i], prepared[j])) {
+        adjacency[i].push(j);
+        adjacency[j].push(i);
+      }
+    }
+  }
+
+  const visited = new Array(prepared.length).fill(false);
+
+  for (let i = 0; i < prepared.length; i += 1) {
+    if (visited[i]) continue;
+    const queue = [i];
+    const group: number[] = [];
+    visited[i] = true;
+    while (queue.length) {
+      const current = queue.shift()!;
+      group.push(current);
+      adjacency[current].forEach((next) => {
+        if (!visited[next]) {
+          visited[next] = true;
+          queue.push(next);
+        }
+      });
+    }
+
+    const groupEvents = group.sort((a, b) => prepared[a].start - prepared[b].start);
+    const columns: number[] = [];
+    let maxColumns = 1;
+    groupEvents.forEach((index) => {
+      const event = prepared[index];
+      let columnIndex = 0;
+      while (columns[columnIndex] && columns[columnIndex] > event.start) {
+        columnIndex += 1;
+      }
+      columns[columnIndex] = event.end;
+      event.column = columnIndex;
+      maxColumns = Math.max(maxColumns, columnIndex + 1);
+    });
+    groupEvents.forEach((index) => {
+      prepared[index].columns = maxColumns;
+    });
+  }
+
+  return prepared.map((event) => ({
+    slot: event.slot,
+    top: ((event.start - START_HOUR * 60) / 60) * HOUR_HEIGHT,
+    height: Math.max(40, ((event.end - event.start) / 60) * HOUR_HEIGHT),
+    column: event.column,
+    columns: event.columns
+  }));
+}
+
+const isOverlap = (a: { start: number; end: number }, b: { start: number; end: number }) => {
+  return Math.max(a.start, b.start) < Math.min(a.end, b.end);
+};
+
+type SlotDetailSheetProps = {
+  slot: Slot | null;
+  visible: boolean;
+  onClose: () => void;
+  onEdit: (slot: Slot) => void;
+  onDuplicate: (slot: Slot) => void;
+  onTogglePublish: (slot: Slot) => void;
+  onCloseSlot: (slot: Slot) => void;
+};
+
+function SlotDetailSheet({ slot, visible, onClose, onEdit, onDuplicate, onTogglePublish, onCloseSlot }: SlotDetailSheetProps) {
+  if (!slot) return null;
 
   return (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 16 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Text style={{ fontSize: 22, fontWeight: '800' }}>体験枠の管理</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <Tag label={isOnline ? 'オンライン' : 'オフライン'} active={!isOnline} onPress={() => setOnline(!isOnline)} />
-          {offlineQueue.length > 0 ? (
-            <UIButton variant="ghost" onPress={processQueue} style={{ minWidth: 100 }}>
-              再試行
-            </UIButton>
-          ) : null}
-        </View>
-      </View>
-      <UIButton variant="secondary" onPress={() => openCreateModal()} style={{ alignSelf: 'flex-end', minWidth: 120 }}>
-        ＋新規
-      </UIButton>
-
-      {offlineQueue.length > 0 ? (
-        <View style={{ borderRadius: 16, borderWidth: 1, borderColor: '#BFDBFE', backgroundColor: '#EFF6FF', padding: 16 }}>
-          <Text style={{ fontSize: 14, color: '#1D4ED8', fontWeight: '700' }}>オフラインで保存された更新があります。ネットワークが復帰すると自動で同期します。</Text>
-        </View>
-      ) : null}
-
-      <SegmentedControl
-        segments={VIEW_MODES.map((item) => ({ label: item.label, value: item.value }))}
-        value={viewMode}
-        onChange={(value) => setViewMode(value as ViewMode)}
-      />
-
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <UIButton variant="ghost" onPress={() => shiftFocus(-1)} style={{ minWidth: 100 }}>
-          ← 前へ
-        </UIButton>
-        <Text style={{ fontSize: 16, fontWeight: '700' }}>{viewMode === 'month' ? formatMonthLabel(focusDate) : formatDay(focusDate)}</Text>
-        <UIButton variant="ghost" onPress={() => shiftFocus(1)} style={{ minWidth: 100 }}>
-          次へ →
-        </UIButton>
-      </View>
-
-      {renderCalendar()}
-
-      {detailSlot ? (
-        <UICard style={{ borderRadius: 20, padding: 20, gap: 12 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={{ fontSize: 18, fontWeight: '800' }}>{detailSlot.experience}</Text>
-            <TouchableOpacity onPress={() => setDetailSlotId(null)}>
-              <Text style={{ color: colors.muted }}>閉じる</Text>
+    <Modal visible={visible} animationType='slide' transparent onRequestClose={onClose}>
+      <View style={styles.detailOverlay}>
+        <View style={styles.detailSheet}>
+          <View style={styles.detailHeader}>
+            <Text style={styles.detailTitle}>{slot.experience}</Text>
+            <TouchableOpacity onPress={onClose}>
+              <X size={22} color={colors.muted} />
             </TouchableOpacity>
           </View>
-          <Text style={{ fontSize: 15 }}>{formatDay(detailSlot.date)}</Text>
-          <Text style={{ fontSize: 15 }}>{detailSlot.start} - {detailSlot.end}</Text>
-          <Text style={{ fontSize: 15 }}>会場：{detailSlot.venue}</Text>
-          <Text style={{ fontSize: 15 }}>担当：{detailSlot.mentor}</Text>
-          <Text style={{ fontSize: 14, color: colors.muted }}>残席 {detailSlot.remaining} / {detailSlot.capacity}</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <Tag label={detailSlot.state} active={detailSlot.state === '公開中'} />
-            <Tag label={`対象 ${detailSlot.ageRange}`} />
-            <Tag label={`締切 ${detailSlot.deadlineHours}h`} />
-            {lastMinuteFlag(detailSlot) ? <Tag label="直前枠" active /> : null}
-            {(detailSlot.tags ?? []).map((tag) => (
-              <Tag key={tag} label={tag} />
-            ))}
+
+          <View style={styles.detailMetaRow}>
+            <Clock size={16} color={colors.muted} />
+            <Text style={styles.detailMetaText}>{slot.date} / {slot.start} - {slot.end}</Text>
           </View>
-          {detailSlot.price ? <Text style={{ fontSize: 14 }}>価格：{detailSlot.price}</Text> : null}
-          {detailSlot.category ? <Text style={{ fontSize: 14 }}>カテゴリ：{detailSlot.category}</Text> : null}
-          {detailSlot.note ? <Text style={{ fontSize: 14, color: colors.muted }}>備考：{detailSlot.note}</Text> : null}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
-            <UIButton variant="ghost" onPress={() => togglePublish(detailSlot)} style={{ flexGrow: 1, minWidth: 120 }}>
-              {detailSlot.state === '公開中' ? '下書きに戻す' : '公開'}
-            </UIButton>
-            <UIButton variant="ghost" onPress={() => openEditModal(detailSlot)} style={{ flexGrow: 1, minWidth: 120 }}>
-              編集
-            </UIButton>
-            <UIButton variant="ghost" onPress={() => duplicateSlot(detailSlot)} style={{ flexGrow: 1, minWidth: 120 }}>
+          <View style={styles.detailMetaRow}>
+            <MapPin size={16} color={colors.muted} />
+            <Text style={styles.detailMetaText}>{slot.venue}</Text>
+          </View>
+          <View style={styles.detailMetaRow}>
+            <User size={16} color={colors.muted} />
+            <Text style={styles.detailMetaText}>{slot.mentor}</Text>
+          </View>
+
+          <View style={styles.detailChipRow}>
+            <Text style={[styles.detailChip, { backgroundColor: `${stateColors[slot.state]}20`, color: stateColors[slot.state] }]}>
+              {stateLabels[slot.state]}
+            </Text>
+            <Text style={styles.detailChip}>定員 {slot.capacity}</Text>
+            <Text style={styles.detailChip}>残席 {slot.remaining}</Text>
+          </View>
+
+          {slot.note ? <Text style={styles.detailNote}>{slot.note}</Text> : null}
+
+          <View style={styles.detailActions}>
+            <UIButton variant='ghost' onPress={() => onDuplicate(slot)} style={styles.detailButton}>
               複製
             </UIButton>
-            <UIButton variant="ghost" onPress={() => handleCloseSlot(detailSlot)} style={{ flexGrow: 1, minWidth: 120 }}>
+            <UIButton variant='ghost' onPress={() => onTogglePublish(slot)} style={styles.detailButton}>
+              {slot.state === '公開中' ? '下書きに戻す' : '公開する'}
+            </UIButton>
+          </View>
+          <View style={styles.detailActions}>
+            <UIButton variant='ghost' onPress={() => onEdit(slot)} style={styles.detailButton}>
+              編集
+            </UIButton>
+            <UIButton variant='ghost' onPress={() => onCloseSlot(slot)} style={styles.detailButton}>
               クローズ
             </UIButton>
           </View>
-        </UICard>
-      ) : null}
-
-      <Modal visible={modalVisible} animationType={Platform.OS === 'ios' ? 'slide' : 'fade'} onRequestClose={() => setModalVisible(false)} presentationStyle="pageSheet">
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40, gap: 16 }}>
-          <Text style={{ fontSize: 22, fontWeight: '800' }}>{editingSlotId ? '体験枠を編集' : '体験枠を追加'}</Text>
-
-          {/* 主要項目 */}
-          <View style={{ gap: 12 }}>
-            <View>
-              <Text style={{ fontSize: 14, fontWeight: '700' }}>体験名 *</Text>
-              <TextInput
-                value={slotDraft.experience}
-                onChangeText={(text) => setSlotDraft((prev) => ({ ...prev, experience: text }))}
-                placeholder="例）STEAM クリエイティブ"
-                style={{ borderWidth: 1, borderColor: formErrors.experience ? '#DC2626' : colors.border, borderRadius: 12, padding: 12 }}
-              />
-              {formErrors.experience ? <Text style={{ color: '#DC2626', marginTop: 4 }}>{formErrors.experience}</Text> : null}
-            </View>
-
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 14, fontWeight: '700' }}>日付 *</Text>
-                <TextInput
-                  value={slotDraft.date}
-                  onChangeText={(text) => setSlotDraft((prev) => ({ ...prev, date: text }))}
-                  placeholder="YYYY-MM-DD"
-                  style={{ borderWidth: 1, borderColor: formErrors.date ? '#DC2626' : colors.border, borderRadius: 12, padding: 12 }}
-                />
-                {formErrors.date ? <Text style={{ color: '#DC2626', marginTop: 4 }}>{formErrors.date}</Text> : null}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 14, fontWeight: '700' }}>開始 *</Text>
-                <TextInput
-                  value={slotDraft.start}
-                  onChangeText={(text) => setSlotDraft((prev) => ({ ...prev, start: text }))}
-                  placeholder="10:00"
-                  style={{ borderWidth: 1, borderColor: formErrors.time ? '#DC2626' : colors.border, borderRadius: 12, padding: 12 }}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 14, fontWeight: '700' }}>終了 *</Text>
-                <TextInput
-                  value={slotDraft.end}
-                  onChangeText={(text) => setSlotDraft((prev) => ({ ...prev, end: text }))}
-                  placeholder="11:30"
-                  style={{ borderWidth: 1, borderColor: formErrors.time ? '#DC2626' : colors.border, borderRadius: 12, padding: 12 }}
-                />
-                {formErrors.time ? <Text style={{ color: '#DC2626', marginTop: 4 }}>{formErrors.time}</Text> : null}
-              </View>
-            </View>
-
-            <View>
-              <Text style={{ fontSize: 14, fontWeight: '700' }}>会場 *</Text>
-              <TextInput
-                value={slotDraft.venue}
-                onChangeText={(text) => setSlotDraft((prev) => ({ ...prev, venue: text }))}
-                placeholder="例）目黒スタジオA"
-                style={{ borderWidth: 1, borderColor: formErrors.venue ? '#DC2626' : colors.border, borderRadius: 12, padding: 12 }}
-              />
-              {formErrors.venue ? <Text style={{ color: '#DC2626', marginTop: 4 }}>{formErrors.venue}</Text> : null}
-            </View>
-
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 14, fontWeight: '700' }}>定員 *</Text>
-                <TextInput
-                  value={String(slotDraft.capacity)}
-                  keyboardType="number-pad"
-                  onChangeText={(text) => {
-                    const capacity = Number(text) || 0;
-                    setSlotDraft((prev) => ({ ...prev, capacity, remaining: Math.max(0, capacity - (prev.capacity - prev.remaining)) }));
-                  }}
-                  style={{ borderWidth: 1, borderColor: formErrors.capacity ? '#DC2626' : colors.border, borderRadius: 12, padding: 12 }}
-                />
-                {formErrors.capacity ? <Text style={{ color: '#DC2626', marginTop: 4 }}>{formErrors.capacity}</Text> : null}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 14, fontWeight: '700' }}>対象年齢 *</Text>
-                <TextInput
-                  value={slotDraft.ageRange}
-                  onChangeText={(text) => setSlotDraft((prev) => ({ ...prev, ageRange: text }))}
-                  placeholder="例）8-11歳"
-                  style={{ borderWidth: 1, borderColor: formErrors.ageRange ? '#DC2626' : colors.border, borderRadius: 12, padding: 12 }}
-                />
-                {formErrors.ageRange ? <Text style={{ color: '#DC2626', marginTop: 4 }}>{formErrors.ageRange}</Text> : null}
-              </View>
-            </View>
-          </View>
-
-          {/* 詳細設定トグル */}
-          <TouchableOpacity
-            onPress={() => setShowAdvanced(!showAdvanced)}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: 12,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: colors.border,
-              backgroundColor: '#F9FAFB'
-            }}
-          >
-            <Text style={{ fontSize: 15, fontWeight: '600' }}>詳細設定</Text>
-            <Text style={{ fontSize: 18 }}>{showAdvanced ? '▲' : '▼'}</Text>
-          </TouchableOpacity>
-
-          {/* 詳細項目 */}
-          {showAdvanced ? (
-            <View style={{ gap: 12 }}>
-              <View>
-                <Text style={{ fontSize: 14, fontWeight: '700' }}>担当メンター</Text>
-                <TextInput
-                  value={slotDraft.mentor}
-                  onChangeText={(text) => setSlotDraft((prev) => ({ ...prev, mentor: text }))}
-                  placeholder="例）佐藤ひかり"
-                  style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12 }}
-                />
-              </View>
-
-              <View>
-                <Text style={{ fontSize: 14, fontWeight: '700' }}>公開設定</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                  {(['公開中', '下書き', '満席', 'クローズ'] as SlotState[]).map((state) => (
-                    <Tag key={state} label={state} active={slotDraft.state === state} onPress={() => setSlotDraft((prev) => ({ ...prev, state }))} />
-                  ))}
-                </ScrollView>
-              </View>
-
-              <View>
-                <Text style={{ fontSize: 14, fontWeight: '700' }}>価格</Text>
-                <TextInput
-                  value={slotDraft.price ?? ''}
-                  onChangeText={(text) => setSlotDraft((prev) => ({ ...prev, price: text || undefined }))}
-                  placeholder="例）無料 / ¥5,500"
-                  style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12 }}
-                />
-              </View>
-
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700' }}>カテゴリ</Text>
-                  <TextInput
-                    value={slotDraft.category ?? ''}
-                    onChangeText={(text) => setSlotDraft((prev) => ({ ...prev, category: text || undefined }))}
-                    placeholder="例）プログラミング"
-                    style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12 }}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700' }}>タグ</Text>
-                  <TextInput
-                    value={(slotDraft.tags ?? []).join(',')}
-                    onChangeText={(text) => setSlotDraft((prev) => ({ ...prev, tags: text ? text.split(',').map((t) => t.trim()).filter(Boolean) : [] }))}
-                    placeholder="例）体験,未就学"
-                    style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12 }}
-                  />
-                </View>
-              </View>
-
-              <View>
-                <Text style={{ fontSize: 14, fontWeight: '700' }}>備考</Text>
-                <TextInput
-                  value={slotDraft.note ?? ''}
-                  onChangeText={(text) => setSlotDraft((prev) => ({ ...prev, note: text || undefined }))}
-                  placeholder="持ち物、注意事項など"
-                  multiline
-                  style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, minHeight: 80, textAlignVertical: 'top' }}
-                />
-              </View>
-
-              <View>
-                <Text style={{ fontSize: 14, fontWeight: '700' }}>募集締切</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                  {deadlineOptions.map((option) => (
-                    <Tag key={option} label={`${option}時間前`} active={slotDraft.deadlineHours === option} onPress={() => setSlotDraft((prev) => ({ ...prev, deadlineHours: option }))} />
-                  ))}
-                </ScrollView>
-              </View>
-
-              <View>
-                <Text style={{ fontSize: 14, fontWeight: '700' }}>繰り返し</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                  {[
-                    { label: 'なし', value: 'none' },
-                    { label: '毎週', value: 'weekly' },
-                    { label: '隔週', value: 'biweekly' },
-                    { label: '毎月', value: 'monthly' }
-                  ].map((option) => (
-                    <Tag
-                      key={option.value}
-                      label={option.label}
-                      active={(slotDraft.repeat?.type ?? 'none') === option.value}
-                      onPress={() =>
-                        setSlotDraft((prev) => ({
-                          ...prev,
-                          repeat: {
-                            ...(prev.repeat ?? { type: 'none' as RepeatType }),
-                            type: option.value as RepeatType
-                          }
-                        }))
-                      }
-                    />
-                  ))}
-                </ScrollView>
-                {(slotDraft.repeat?.type ?? 'none') !== 'none' ? (
-                  <TextInput
-                    value={slotDraft.repeat?.until ?? ''}
-                    onChangeText={(text) =>
-                      setSlotDraft((prev) => ({
-                        ...prev,
-                        repeat: {
-                          ...(prev.repeat ?? { type: 'none' as RepeatType }),
-                          until: text || undefined
-                        }
-                      }))
-                    }
-                    placeholder="終了日（任意） YYYY-MM-DD"
-                    style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, marginTop: 8 }}
-                  />
-                ) : null}
-              </View>
-            </View>
-          ) : null}
-
-          {conflictPreview ? (
-            <View style={{ borderRadius: 12, borderWidth: 1, borderColor: '#FCA5A5', backgroundColor: '#FEF2F2', padding: 12 }}>
-              <Text style={{ color: '#B91C1C', fontWeight: '700' }}>担当者または会場が他の枠と重複しています。時間を調整してください。</Text>
-            </View>
-          ) : null}
-
-          <View style={{ flexDirection: 'row', gap: 12, marginTop: 8 }}>
-            <UIButton variant="ghost" onPress={() => setModalVisible(false)} style={{ flex: 1 }}>
-              キャンセル
-            </UIButton>
-            <UIButton variant="secondary" onPress={saveSlot} style={{ flex: 1 }}>
-              {editingSlotId ? '更新' : '保存'}
-            </UIButton>
-          </View>
-        </ScrollView>
-      </Modal>
-    </ScrollView>
+        </View>
+      </View>
+    </Modal>
   );
 }
+
+type SlotEditorModalProps = {
+  visible: boolean;
+  draft: SlotDraft;
+  errors: Record<string, string>;
+  onChange: (draft: SlotDraft) => void;
+  onClose: () => void;
+  onSave: () => void;
+};
+
+function SlotEditorModal({ visible, draft, errors, onChange, onClose, onSave }: SlotEditorModalProps) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={visible} animationType={Platform.OS === 'ios' ? 'slide' : 'fade'} onRequestClose={onClose}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: '#FFFFFF',
+          paddingTop: insets.top + 16
+        }}
+      >
+        <ScrollView
+          contentContainerStyle={[
+            styles.editorContainer,
+            { paddingBottom: Math.max(insets.bottom, 16) + 32 }
+          ]}
+          keyboardShouldPersistTaps='handled'
+        >
+        <View style={styles.editorHeader}>
+          <TouchableOpacity onPress={onClose}>
+            <X size={22} color={colors.muted} />
+          </TouchableOpacity>
+          <Text style={styles.editorTitle}>{draft.id.startsWith('SLOT-') ? '体験枠の編集' : '体験枠の作成'}</Text>
+          <View style={{ width: 24 }} />
+        </View>
+
+        <View style={styles.editorField}>
+          <Text style={styles.editorLabel}>体験名 *</Text>
+          <TextInput
+            value={draft.experience}
+            onChangeText={(value) => onChange({ ...draft, experience: value })}
+            placeholder='例）STEAM クリエイティブ体験'
+            style={[styles.editorInput, errors.experience && styles.editorInputError]}
+          />
+          {errors.experience ? <Text style={styles.editorErrorText}>{errors.experience}</Text> : null}
+        </View>
+
+        <View style={styles.editorRow}>
+          <View style={[styles.editorField, { flex: 1 }]}> 
+            <Text style={styles.editorLabel}>日付 *</Text>
+            <TextInput
+              value={draft.date}
+              onChangeText={(value) => onChange({ ...draft, date: value })}
+              placeholder='YYYY-MM-DD'
+              style={[styles.editorInput, errors.date && styles.editorInputError]}
+            />
+            {errors.date ? <Text style={styles.editorErrorText}>{errors.date}</Text> : null}
+          </View>
+          <View style={[styles.editorField, { flex: 1 }]}> 
+            <Text style={styles.editorLabel}>開始 *</Text>
+            <TextInput
+              value={draft.start}
+              onChangeText={(value) => onChange({ ...draft, start: value })}
+              placeholder='10:00'
+              style={[styles.editorInput, errors.time && styles.editorInputError]}
+            />
+          </View>
+          <View style={[styles.editorField, { flex: 1 }]}> 
+            <Text style={styles.editorLabel}>終了 *</Text>
+            <TextInput
+              value={draft.end}
+              onChangeText={(value) => onChange({ ...draft, end: value })}
+              placeholder='11:30'
+              style={[styles.editorInput, errors.time && styles.editorInputError]}
+            />
+            {errors.time ? <Text style={styles.editorErrorText}>{errors.time}</Text> : null}
+          </View>
+        </View>
+
+        <View style={styles.editorField}>
+          <Text style={styles.editorLabel}>会場 *</Text>
+          <TextInput
+            value={draft.venue}
+            onChangeText={(value) => onChange({ ...draft, venue: value })}
+            placeholder='例）目黒スタジオA'
+            style={[styles.editorInput, errors.venue && styles.editorInputError]}
+          />
+          {errors.venue ? <Text style={styles.editorErrorText}>{errors.venue}</Text> : null}
+        </View>
+
+        <View style={styles.editorRow}>
+          <View style={[styles.editorField, { flex: 1 }]}> 
+            <Text style={styles.editorLabel}>定員 *</Text>
+            <TextInput
+              value={String(draft.capacity)}
+              onChangeText={(value) => onChange({ ...draft, capacity: Number(value.replace(/[^0-9]/g, '')) || 0 })}
+              placeholder='8'
+              keyboardType='numeric'
+              style={[styles.editorInput, errors.capacity && styles.editorInputError]}
+            />
+            {errors.capacity ? <Text style={styles.editorErrorText}>{errors.capacity}</Text> : null}
+          </View>
+          <View style={[styles.editorField, { flex: 1 }]}> 
+            <Text style={styles.editorLabel}>残席</Text>
+            <TextInput
+              value={String(draft.remaining)}
+              onChangeText={(value) => onChange({ ...draft, remaining: Number(value.replace(/[^0-9]/g, '')) || 0 })}
+              placeholder='8'
+              keyboardType='numeric'
+              style={styles.editorInput}
+            />
+          </View>
+        </View>
+
+        <View style={styles.editorRow}>
+          <View style={[styles.editorField, { flex: 1 }]}> 
+            <Text style={styles.editorLabel}>担当</Text>
+            <TextInput
+              value={draft.mentor}
+              onChangeText={(value) => onChange({ ...draft, mentor: value })}
+              placeholder='担当メンター'
+              style={[styles.editorInput, errors.mentor && styles.editorInputError]}
+            />
+            {errors.mentor ? <Text style={styles.editorErrorText}>{errors.mentor}</Text> : null}
+          </View>
+          <View style={[styles.editorField, { flex: 1 }]}> 
+            <Text style={styles.editorLabel}>対象年齢</Text>
+            <TextInput
+              value={draft.ageRange}
+              onChangeText={(value) => onChange({ ...draft, ageRange: value })}
+              placeholder='8-12歳'
+              style={styles.editorInput}
+            />
+          </View>
+        </View>
+
+        <View style={styles.editorField}>
+          <Text style={styles.editorLabel}>メモ</Text>
+          <TextInput
+            value={draft.note}
+            onChangeText={(value) => onChange({ ...draft, note: value })}
+            placeholder='持ち物、注意事項など'
+            multiline
+            style={[styles.editorInput, styles.editorTextarea]}
+          />
+        </View>
+
+        <View style={styles.editorActions}>
+          <UIButton variant='ghost' onPress={onClose} style={{ minWidth: 120 }}>
+            キャンセル
+          </UIButton>
+          <UIButton variant='primary' onPress={onSave} style={{ minWidth: 160 }}>
+            保存する
+          </UIButton>
+        </View>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  contentContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 24,
+    gap: 12
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16
+  },
+  monthButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6
+  },
+  monthTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.fg
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  headerIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  headerIconText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.fg
+  },
+  segmentContainer: {
+    paddingHorizontal: 16,
+    marginTop: 12
+  },
+  syncBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#F3F4F6'
+  },
+  syncBannerText: {
+    fontSize: 13,
+    color: colors.fg
+  },
+  syncBannerAction: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#2563EB'
+  },
+  swipeContainer: {
+    width: '100%'
+  },
+  calendarWrapper: {
+    width: '100%',
+    flexShrink: 0
+  },
+  monthContainer: {
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 12
+  },
+  monthWeekRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    marginBottom: 4
+  },
+  monthWeekText: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.muted
+  },
+  monthRow: {
+    flexDirection: 'row',
+    marginVertical: -0.5
+  },
+  monthCell: {
+    flex: 1,
+    minHeight: 108,
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    borderRightWidth: 0.5,
+    borderBottomWidth: 0.5,
+    borderColor: '#E5E7EB'
+  },
+  monthCellHeader: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start'
+  },
+  monthDateBadge: {
+    minWidth: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14
+  },
+  monthDateBadgeSelected: {
+    backgroundColor: '#1C64F2'
+  },
+  monthDateBadgeToday: {
+    backgroundColor: '#DBEAFE'
+  },
+  monthDateText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.fg
+  },
+  monthEventList: {
+    marginTop: 6,
+    gap: 4
+  },
+  monthEventSummary: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#E5E7EB'
+  },
+  monthEventSummaryText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.fg
+  },
+  timelineContainer: {
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 8
+  },
+  timelineHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  timelineHeaderLabel: {
+    justifyContent: 'flex-end',
+    paddingBottom: 6
+  },
+  timelineHeaderText: {
+    fontSize: 12,
+    color: colors.muted,
+    fontWeight: '600'
+  },
+  timelineDayHeader: {
+    alignItems: 'center',
+    paddingVertical: 8,
+    gap: 4
+  },
+  timelineDayWeek: {
+    fontSize: 12,
+    color: colors.muted,
+    fontWeight: '600'
+  },
+  timelineDayWeekToday: {
+    color: '#2563EB'
+  },
+  timelineDayBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  timelineDayBadgeSelected: {
+    borderWidth: 1,
+    borderColor: '#2563EB',
+    backgroundColor: '#E0ECFF'
+  },
+  timelineDayBadgeToday: {
+    backgroundColor: '#2563EB'
+  },
+  timelineDayDate: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.fg
+  },
+  timelineDayDateToday: {
+    color: '#FFFFFF'
+  },
+  timelineDayDateSelected: {
+    color: '#2563EB'
+  },
+  timeColumn: {
+    width: 60,
+    paddingTop: 16,
+    paddingRight: 8
+  },
+  timeLabelRow: {
+    height: HOUR_HEIGHT,
+    justifyContent: 'flex-start'
+  },
+  timeLabelText: {
+    fontSize: 11,
+    color: colors.muted
+  },
+  timelineDayColumn: {
+    position: 'relative',
+    borderLeftWidth: 1,
+    borderLeftColor: '#F3F4F6'
+  },
+  timelineHourRow: {
+    height: HOUR_HEIGHT,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6'
+  },
+  timelineEvent: {
+    position: 'absolute',
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 8,
+    gap: 4
+  },
+  timelineEventTime: {
+    fontSize: 10,
+    color: colors.muted,
+    fontWeight: '600'
+  },
+  timelineEventTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.fg
+  },
+  timelineEventMeta: {
+    fontSize: 10,
+    color: colors.muted
+  },
+  fabContainer: {
+    position: 'absolute',
+    right: 24
+  },
+  fab: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#4285F4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 5
+  },
+  syncContainer: {
+    position: 'absolute',
+    right: 24
+  },
+  syncButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E3A8A',
+    borderRadius: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4
+  },
+  syncButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700'
+  },
+  detailOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    justifyContent: 'flex-end'
+  },
+  detailSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    gap: 16
+  },
+  detailHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  detailTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.fg
+  },
+  detailMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  detailMetaText: {
+    fontSize: 13,
+    color: colors.muted
+  },
+  detailChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8
+  },
+  detailChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    fontSize: 12,
+    color: colors.muted,
+    backgroundColor: '#F3F4F6'
+  },
+  detailNote: {
+    fontSize: 13,
+    color: colors.fg,
+    lineHeight: 18
+  },
+  detailActions: {
+    flexDirection: 'row',
+    gap: 12
+  },
+  detailButton: {
+    flex: 1,
+    minWidth: 140
+  },
+  editorContainer: {
+    padding: 20,
+    gap: 16
+  },
+  editorHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  editorTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.fg
+  },
+  editorField: {
+    gap: 6
+  },
+  editorLabel: {
+    fontSize: 13,
+    color: colors.muted
+  },
+  editorInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 14,
+    color: colors.fg
+  },
+  editorInputError: {
+    borderColor: '#EF4444'
+  },
+  editorErrorText: {
+    fontSize: 12,
+    color: '#EF4444'
+  },
+  editorRow: {
+    flexDirection: 'row',
+    gap: 12
+  },
+  editorTextarea: {
+    minHeight: 100,
+    textAlignVertical: 'top'
+  },
+  editorActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12
+  }
+});

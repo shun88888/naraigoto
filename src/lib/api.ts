@@ -19,8 +19,12 @@ export async function listExperiences({ page = 1, pageSize = 10, filters = {} }:
     else query = query.order('id');
     const { data, error } = await query;
     if (error) throw error;
-    await AsyncStorage.setItem('cache:experiences', JSON.stringify(data));
-    return data;
+
+    const list = Array.isArray(data) ? data : [];
+    const normalized = list.length > 0 ? list : dummyExperiences;
+
+    await AsyncStorage.setItem('cache:experiences', JSON.stringify(normalized));
+    return normalized;
   } catch (e) {
     const cached = await AsyncStorage.getItem('cache:experiences');
     if (cached) return JSON.parse(cached);
@@ -179,5 +183,4 @@ export async function getFeedback(id: string) {
   if (error) throw error;
   return data;
 }
-
 

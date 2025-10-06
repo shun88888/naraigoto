@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Switch, Alert, SafeAreaView, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { View, Text, Switch, Alert, ScrollView, TouchableOpacity, Image, Platform, StatusBar } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { UIButton } from '../../../src/components/ui/Button';
 import { reserve } from '../../../src/lib/api';
@@ -39,8 +39,10 @@ export default function ConfirmScreen() {
     );
   }
 
+  const statusBarHeight = Platform.OS === 'ios' ? 44 : StatusBar.currentHeight || 0;
+
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
+    <View style={{ flex: 1, backgroundColor: '#F8F9FA', paddingTop: statusBarHeight }}>
       <ScrollView style={{ flex: 1 }}>
         {/* Header */}
         <View style={{
@@ -275,7 +277,7 @@ export default function ConfirmScreen() {
           </Text>
         </UIButton>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

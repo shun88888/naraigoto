@@ -1,6 +1,5 @@
-import React, { useRef } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import { View, Text, Dimensions, Animated, PanResponder, TouchableWithoutFeedback, Image } from 'react-native';
-import { UICard } from './ui/Card';
 import { colors } from '../lib/colors';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -30,60 +29,83 @@ type Props = {
   onSwipeLeft: (item: SwipeItem) => void;
   onSwipeRight: (item: SwipeItem) => void;
   onPressItem?: (item: SwipeItem) => void;
+  tabBarHeight?: number;
 };
 
-export function SwipeDeck({ data, index, onSwipeLeft, onSwipeRight, onPressItem }: Props) {
+export function SwipeDeck({ data, index, onSwipeLeft, onSwipeRight, onPressItem, tabBarHeight }: Props) {
   const position = useRef(new Animated.ValueXY()).current;
+  const bottomSpacing = (tabBarHeight ?? 0) + 12;
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderMove: (_evt, gesture) => {
-        position.setValue({ x: gesture.dx, y: gesture.dy });
-      },
-      onPanResponderRelease: (_evt, gesture) => {
-        // Tap detection: very small movement considered as tap
-        const absDx = Math.abs(gesture.dx);
-        const absDy = Math.abs(gesture.dy);
-        const currentItem = data.length ? data[index % data.length] : undefined;
-        if (absDx < 8 && absDy < 8 && currentItem) {
-          onPressItem && onPressItem(currentItem);
-          resetPosition();
-          return;
-        }
+  const onSwipeComplete = useCallback((direction: 'left' | 'right') => {
+    if (!data.length) return;
+    const item = data[index % data.length];
+    if (!item) return;
+    if (direction === 'right') {
+      onSwipeRight(item);
+    } else {
+      onSwipeLeft(item);
+    }
+    position.setValue({ x: 0, y: 0 });
+  }, [data, index, onSwipeLeft, onSwipeRight, position]);
 
-        if (gesture.dx > SWIPE_THRESHOLD) {
-          forceSwipe('right');
-        } else if (gesture.dx < -SWIPE_THRESHOLD) {
-          forceSwipe('left');
-        } else {
-          resetPosition();
-        }
-      }
-    })
-  ).current;
+  const resetPosition = useCallback(() => {
+    Animated.spring(position, {
+      toValue: { x: 0, y: 0 },
+      useNativeDriver: false
+    }).start();
+  }, [position]);
 
-  const forceSwipe = (direction: 'left' | 'right') => {
+  const forceSwipe = useCallback((direction: 'left' | 'right') => {
     const x = direction === 'right' ? SCREEN_WIDTH : -SCREEN_WIDTH;
     Animated.timing(position, {
       toValue: { x, y: 0 },
       duration: SWIPE_OUT_DURATION,
       useNativeDriver: false
     }).start(() => onSwipeComplete(direction));
-  };
+  }, [onSwipeComplete, position]);
 
-  const onSwipeComplete = (direction: 'left' | 'right') => {
-    const item = data[index % data.length];
-    direction === 'right' ? onSwipeRight(item) : onSwipeLeft(item);
-    position.setValue({ x: 0, y: 0 });
-  };
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: (evt) => {
+          const { pageY } = evt.nativeEvent;
+          const screenHeight = Dimensions.get('window').height;
+          const isInTabBarArea = pageY > screenHeight - bottomSpacing;
+          return !isInTabBarArea;
+        },
+        onMoveShouldSetPanResponder: (evt, gesture) => {
+          const { pageY } = evt.nativeEvent;
+          const screenHeight = Dimensions.get('window').height;
+          const isInTabBarArea = pageY > screenHeight - bottomSpacing;
+          const hasMoved = Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4;
+          return hasMoved && !isInTabBarArea;
+        },
+        onStartShouldSetPanResponderCapture: () => false,
+        onMoveShouldSetPanResponderCapture: () => false,
+        onPanResponderMove: (_evt, gesture) => {
+          position.setValue({ x: gesture.dx, y: gesture.dy });
+        },
+        onPanResponderRelease: (_evt, gesture) => {
+          const absDx = Math.abs(gesture.dx);
+          const absDy = Math.abs(gesture.dy);
+          const currentItem = data.length ? data[index % data.length] : undefined;
+          if (absDx < 8 && absDy < 8 && currentItem) {
+            onPressItem && onPressItem(currentItem);
+            resetPosition();
+            return;
+          }
 
-  const resetPosition = () => {
-    Animated.spring(position, {
-      toValue: { x: 0, y: 0 },
-      useNativeDriver: false
-    }).start();
-  };
+          if (gesture.dx > SWIPE_THRESHOLD) {
+            forceSwipe('right');
+          } else if (gesture.dx < -SWIPE_THRESHOLD) {
+            forceSwipe('left');
+          } else {
+            resetPosition();
+          }
+        }
+      }),
+    [data, forceSwipe, bottomSpacing, index, onPressItem, position, resetPosition]
+  );
 
   const rotate = position.x.interpolate({
     inputRange: [-SCREEN_WIDTH * 1.5, 0, SCREEN_WIDTH * 1.5],
@@ -106,13 +128,16 @@ export function SwipeDeck({ data, index, onSwipeLeft, onSwipeRight, onPressItem 
   if (!item) return null;
 
   return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', marginBottom: bottomSpacing }} pointerEvents="box-none">
       <Animated.View
+        pointerEvents="box-none"
         style={[
           {
-            position: 'absolute',
+            // Keep the card centered within the available content area and ensure it
+            // doesn't overlap the bottom tab bar area so tab presses are not blocked.
             width: SCREEN_WIDTH - 20,
             height: 520,
+            alignSelf: 'center',
             transform: [{ translateX: position.x }, { translateY: position.y }, { rotate }]
           }
         ]}
@@ -185,7 +210,7 @@ export function SwipeDeck({ data, index, onSwipeLeft, onSwipeRight, onPressItem 
               justifyContent: 'space-between',
               alignItems: 'flex-start',
               zIndex: 10
-            }}>
+            }} pointerEvents="none">
               {/* Left side tags */}
               <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap', flex: 1, marginRight: 12 }}>
                 {/* Experience type tag */}
@@ -293,7 +318,7 @@ export function SwipeDeck({ data, index, onSwipeLeft, onSwipeRight, onPressItem 
               padding: 24,
               paddingBottom: 40,
               backgroundColor: 'rgba(0,0,0,0.8)'
-            }}>
+            }} pointerEvents="none">
               <Text style={{
                 fontSize: 30,
                 fontWeight: '800',
@@ -473,21 +498,9 @@ export function SwipeDeck({ data, index, onSwipeLeft, onSwipeRight, onPressItem 
               </Text>
             </Animated.View>
 
-            {/* Tap to view details overlay */}
-            <TouchableWithoutFeedback onPress={() => onPressItem && onPressItem(item)}>
-              <View style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                zIndex: -1
-              }} />
-            </TouchableWithoutFeedback>
+            {/* Tap handled by minimal movement detection in panResponder */}
           </View>
       </Animated.View>
     </View>
   );
 }
-
-

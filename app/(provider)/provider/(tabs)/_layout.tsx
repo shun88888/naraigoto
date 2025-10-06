@@ -1,45 +1,62 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { colors } from '../../../../src/lib/colors';
-import { CalendarDays, ClipboardList, Settings } from 'lucide-react-native';
+import { Platform } from 'react-native';
+import { ClipboardList, CalendarDays, Settings } from 'lucide-react-native';
 
-export default function ProviderTabs() {
+const TAB_ICONS: Record<string, React.ComponentType<{ color: string; size?: number }>> = {
+  reservations: ClipboardList,
+  slots: CalendarDays,
+  settings: Settings
+};
+
+export default function ProviderTabsLayout() {
   return (
     <Tabs
-      screenOptions={{
-        headerShown: true,
-        tabBarShowLabel: true,
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: '#9CA3AF',
-        tabBarStyle: {
-          height: 60,
-          backgroundColor: colors.bg,
-          borderTopColor: colors.border,
-          borderTopWidth: 1
-        }
+      screenOptions={({ route }) => {
+        const IconComponent = TAB_ICONS[route.name] ?? ClipboardList;
+
+        return {
+          headerShown: true,
+          headerTitleStyle: { fontWeight: '700', fontSize: 18 },
+          tabBarActiveTintColor: '#2563EB',
+          tabBarInactiveTintColor: '#6B7280',
+          tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
+          tabBarIcon: ({ color, size }) => (
+            <IconComponent color={color ?? '#6B7280'} size={size ?? 24} />
+          ),
+          tabBarStyle: {
+            backgroundColor: '#FFFFFF',
+            borderTopColor: '#E5E7EB',
+            borderTopWidth: 1,
+            height: Platform.OS === 'ios' ? 82 : 64,
+            paddingTop: 8,
+            paddingBottom: Platform.OS === 'ios' ? 16 : 10
+          }
+        };
       }}
     >
       <Tabs.Screen
-        name="reservations"
+        name='reservations'
         options={{
           title: '予約確認',
-          tabBarIcon: ({ color, size }) => <ClipboardList color={color} size={size} />
+          tabBarLabel: '予約確認'
         }}
       />
       <Tabs.Screen
-        name="slots"
+        name='slots'
         options={{
           title: '体験枠の管理',
-          tabBarIcon: ({ color, size }) => <CalendarDays color={color} size={size} />
+          tabBarLabel: '体験枠'
         }}
       />
       <Tabs.Screen
-        name="settings"
+        name='settings'
         options={{
           title: '設定',
-          tabBarIcon: ({ color, size }) => <Settings color={color} size={size} />
+          tabBarLabel: '設定'
         }}
       />
     </Tabs>
   );
 }
+

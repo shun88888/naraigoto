@@ -183,102 +183,113 @@ export default function ProviderReservations() {
     [reservations, selectedReservationId]
   );
 
+  useEffect(() => {
+    if (detailVisible && !selectedReservation) {
+      setDetailVisible(false);
+    }
+  }, [detailVisible, selectedReservation]);
+
   return (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 16 }}>
-      <View style={{ gap: 12 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={{ fontSize: 22, fontWeight: '800' }}>予約確認</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <Tag label={isOnline ? 'オンライン' : 'オフライン'} active={!isOnline} onPress={() => setOnline(!isOnline)} />
-            {offlineQueue.length > 0 ? (
-              <UIButton variant="ghost" onPress={processQueue} style={{ minWidth: 100 }}>
-                再試行
-              </UIButton>
-            ) : null}
-          </View>
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() => {
-              const prevDate = addDays(currentDate, -1);
-              console.log('Going to previous day:', prevDate);
-              setCurrentDate(prevDate);
-            }}
-            style={{
-              paddingHorizontal: 16,
-              paddingVertical: 12,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: colors.border,
-              minWidth: 80
-            }}
-          >
-            <Text style={{ fontSize: 14, fontWeight: '600', textAlign: 'center' }}>← 前日</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            activeOpacity={1}
-            onPress={() => setDatePickerVisible(true)}
-            style={{ flex: 1 }}
-          >
-            <View style={{ alignItems: 'center', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border }}>
-              <Text style={{ fontSize: 18, fontWeight: '700' }} key={currentDate}>{formatDateLabel(currentDate)}</Text>
+    <View style={{ flex: 1 }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: Platform.OS === 'ios' ? 100 : 80 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={{ gap: 12 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={{ fontSize: 22, fontWeight: '800' }}>予約確認</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <Tag label={isOnline ? 'オンライン' : 'オフライン'} active={!isOnline} onPress={() => setOnline(!isOnline)} />
+              {offlineQueue.length > 0 ? (
+                <UIButton variant="ghost" onPress={processQueue} style={{ minWidth: 100 }}>
+                  再試行
+                </UIButton>
+              ) : null}
             </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() => {
-              const nextDate = addDays(currentDate, 1);
-              console.log('Going to next day:', nextDate);
-              setCurrentDate(nextDate);
-            }}
-            style={{
-              paddingHorizontal: 16,
-              paddingVertical: 12,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: colors.border,
-              minWidth: 80
-            }}
-          >
-            <Text style={{ fontSize: 14, fontWeight: '600', textAlign: 'center' }}>翌日 →</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+          </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <TouchableOpacity
               activeOpacity={0.7}
-              onPress={() => setCurrentDate(todayISO())}
+              onPress={() => {
+                const prevDate = addDays(currentDate, -1);
+                console.log('Going to previous day:', prevDate);
+                setCurrentDate(prevDate);
+              }}
               style={{
                 paddingHorizontal: 16,
                 paddingVertical: 12,
                 borderRadius: 12,
                 borderWidth: 1,
                 borderColor: colors.border,
-                backgroundColor: '#FFFFFF',
-                minWidth: 120
+                minWidth: 80
               }}
             >
-              <Text style={{ fontSize: 14, fontWeight: '600', textAlign: 'center' }}>今日に戻る</Text>
+              <Text style={{ fontSize: 14, fontWeight: '600', textAlign: 'center' }}>← 前日</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => setDatePickerVisible(true)}
+              style={{ flex: 1 }}
+            >
+              <View style={{ alignItems: 'center', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border }}>
+                <Text style={{ fontSize: 18, fontWeight: '700' }} key={currentDate}>{formatDateLabel(currentDate)}</Text>
+              </View>
             </TouchableOpacity>
             <TouchableOpacity
               activeOpacity={0.7}
-              onPress={() => setDatePickerVisible(true)}
+              onPress={() => {
+                const nextDate = addDays(currentDate, 1);
+                console.log('Going to next day:', nextDate);
+                setCurrentDate(nextDate);
+              }}
               style={{
                 paddingHorizontal: 16,
                 paddingVertical: 12,
                 borderRadius: 12,
                 borderWidth: 1,
                 borderColor: colors.border,
-                backgroundColor: '#FFFFFF',
-                minWidth: 120
+                minWidth: 80
               }}
             >
-              <Text style={{ fontSize: 14, fontWeight: '600', textAlign: 'center' }}>日付選択</Text>
+              <Text style={{ fontSize: 14, fontWeight: '600', textAlign: 'center' }}>翌日 →</Text>
             </TouchableOpacity>
           </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={() => setCurrentDate(todayISO())}
+                style={{
+                  paddingHorizontal: 16,
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  backgroundColor: '#FFFFFF',
+                  minWidth: 120
+                }}
+              >
+                <Text style={{ fontSize: 14, fontWeight: '600', textAlign: 'center' }}>今日に戻る</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={() => setDatePickerVisible(true)}
+                style={{
+                  paddingHorizontal: 16,
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  backgroundColor: '#FFFFFF',
+                  minWidth: 120
+                }}
+              >
+                <Text style={{ fontSize: 14, fontWeight: '600', textAlign: 'center' }}>日付選択</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
-      </View>
 
       <UICard style={{ borderRadius: 20, padding: 20 }}>
         <Text style={{ fontSize: 16, fontWeight: '700', marginBottom: 12 }}>検索・絞り込み</Text>
@@ -348,10 +359,16 @@ export default function ProviderReservations() {
           })}
         </View>
       )}
+      </ScrollView>
 
-      <Modal visible={detailVisible} animationType={Platform.OS === 'ios' ? 'slide' : 'fade'} onRequestClose={closeDetail} presentationStyle="pageSheet">
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40, gap: 20 }}>
-          {selectedReservation ? (
+      {detailVisible && selectedReservation ? (
+        <Modal
+          visible
+          animationType={Platform.OS === 'ios' ? 'slide' : 'fade'}
+          onRequestClose={closeDetail}
+          presentationStyle="pageSheet"
+        >
+          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40, gap: 20 }} keyboardShouldPersistTaps="handled">
             <View style={{ gap: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 22, fontWeight: '800' }}>{selectedReservation.child.name}（{selectedReservation.child.age}）</Text>
@@ -540,43 +557,45 @@ export default function ProviderReservations() {
                 </UIButton>
               </UICard>
             </View>
-          ) : null}
-        </ScrollView>
-      </Modal>
+          </ScrollView>
+        </Modal>
+      ) : null}
 
-      <Modal visible={datePickerVisible} transparent animationType="fade" onRequestClose={() => setDatePickerVisible(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', padding: 24 }}>
-          <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, gap: 16 }}>
-            <Text style={{ fontSize: 18, fontWeight: '800' }}>日付を選択</Text>
-            <TextInput
-              placeholder="YYYY-MM-DD"
-              value={currentDate}
-              onChangeText={setCurrentDate}
-              style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12 }}
-            />
-            <ScrollView style={{ maxHeight: 240 }}>
-              {Array.from({ length: 14 }).map((_, index) => {
-                const date = addDays(todayISO(), index);
-                return (
-                  <TouchableOpacity
-                    key={date}
-                    style={{ paddingVertical: 10 }}
-                    onPress={() => {
-                      setCurrentDate(date);
-                      setDatePickerVisible(false);
-                    }}
-                  >
-                    <Text style={{ fontSize: 16 }}>{formatDateLabel(date)}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-            <UIButton variant="ghost" onPress={() => setDatePickerVisible(false)}>
-              閉じる
-            </UIButton>
+      {datePickerVisible ? (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setDatePickerVisible(false)}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', padding: 24 }}>
+            <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, gap: 16 }}>
+              <Text style={{ fontSize: 18, fontWeight: '800' }}>日付を選択</Text>
+              <TextInput
+                placeholder="YYYY-MM-DD"
+                value={currentDate}
+                onChangeText={setCurrentDate}
+                style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12 }}
+              />
+              <ScrollView style={{ maxHeight: 240 }} keyboardShouldPersistTaps="handled">
+                {Array.from({ length: 14 }).map((_, index) => {
+                  const date = addDays(todayISO(), index);
+                  return (
+                    <TouchableOpacity
+                      key={date}
+                      style={{ paddingVertical: 10 }}
+                      onPress={() => {
+                        setCurrentDate(date);
+                        setDatePickerVisible(false);
+                      }}
+                    >
+                      <Text style={{ fontSize: 16 }}>{formatDateLabel(date)}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+              <UIButton variant="ghost" onPress={() => setDatePickerVisible(false)}>
+                閉じる
+              </UIButton>
+            </View>
           </View>
-        </View>
-      </Modal>
-    </ScrollView>
+        </Modal>
+      ) : null}
+    </View>
   );
 }
